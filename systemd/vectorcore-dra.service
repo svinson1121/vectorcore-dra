@@ -1,0 +1,14 @@
+[Unit]
+Description=VectorCore DRA
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vectorcore
+ExecStart=/opt/vectorcore/bin/dra -c /opt/vectorcore/etc/dra.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
