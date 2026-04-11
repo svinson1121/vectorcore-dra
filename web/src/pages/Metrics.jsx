@@ -6,7 +6,7 @@ import { Activity, TrendingUp, AlertTriangle, Clock, XCircle, RefreshCw } from '
 import StatCard from '../components/StatCard.jsx'
 import Spinner from '../components/Spinner.jsx'
 import { usePoller } from '../hooks/usePoller.js'
-import { getPrometheusText, parsePrometheusText, sumMetric, getRecentMessages } from '../api/client.js'
+import { getPrometheusText, parsePrometheusText, sumMetric, getRecentMessages, getPeerStatus } from '../api/client.js'
 
 const STATE_NAMES = { 0: 'CLOSED', 1: 'CONNECTING', 2: 'OPEN', 3: 'DRAINING' }
 const STATE_COLORS = {
@@ -81,6 +81,32 @@ function buildPeerStateData(metrics, msgMap) {
     }
   }
   return Object.values(byPeer)
+}
+
+function normalizePeerState(state) {
+  switch (state) {
+    case 'WAIT_CONN_ACK':
+    case 'WAIT_CEA':
+      return 'CONNECTING'
+    case 'CLOSING':
+      return 'DRAINING'
+    default:
+      return state || 'UNKNOWN'
+  }
+}
+
+function buildPeerStateDataFromStatus(statuses, msgMap) {
+  if (!Array.isArray(statuses)) return []
+  return statuses.map((status) => {
+    const peer = status.fqdn || status.name || '—'
+    const msgs = msgMap[peer] || { in: 0, out: 0 }
+    return {
+      peer,
+      stateName: normalizePeerState(status.state),
+      msgsIn: msgs.in,
+      msgsOut: msgs.out,
+    }
+  })
 }
 
 function buildReconnectData(metrics) {
@@ -217,7 +243,14 @@ function RecentMessages() {
 
 export default function Metrics() {
   const fetchFn = useCallback(getPrometheusText, [])
+  const peerStatusFetchFn = useCallback(getPeerStatus, [])
   const { data: rawText, error, loading, refresh } = usePoller(fetchFn)
+  const { data: peerStatuses, refresh: refreshPeerStatuses } = usePoller(peerStatusFetchFn)
+
+  const refreshAll = useCallback(() => {
+    refresh()
+    refreshPeerStatuses()
+  }, [refresh, refreshPeerStatuses])
 
   if (loading) {
     return (
@@ -233,7 +266,7 @@ export default function Metrics() {
       <div className="error-state">
         <XCircle size={32} className="error-icon" />
         <div>{error}</div>
-        <button className="btn btn-ghost mt-12" onClick={refresh}>
+        <button className="btn btn-ghost mt-12" onClick={refreshAll}>
           <RefreshCw size={14} /> Retry
         </button>
       </div>
@@ -248,7 +281,9 @@ export default function Metrics() {
 
   const msgMap = buildPeerMsgMap(metrics)
   const latencyData = buildLatencyData(metrics)
-  const peerStateData = buildPeerStateData(metrics, msgMap)
+  const peerStateData = Array.isArray(peerStatuses) && peerStatuses.length > 0
+    ? buildPeerStateDataFromStatus(peerStatuses, msgMap)
+    : buildPeerStateData(metrics, msgMap)
   const reconnectData = buildReconnectData(metrics)
 
   return (
@@ -257,7 +292,7 @@ export default function Metrics() {
         <div>
           <div className="page-title">Metrics</div>
         </div>
-        <button className="btn btn-ghost" onClick={refresh}>
+        <button className="btn btn-ghost" onClick={refreshAll}>
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
