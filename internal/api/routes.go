@@ -29,7 +29,7 @@ type RouteRuleCreateRequest struct {
 	AppID     uint32 `json:"app_id"     required:"false"`
 	LBGroup   string `json:"lb_group"   required:"false"`
 	Action    string `json:"action"     required:"true" enum:"route,reject,drop"`
-	Enabled   bool   `json:"enabled"    required:"false" default:"true"`
+	Enabled   *bool  `json:"enabled"    required:"false"`
 }
 
 func registerRoutes(api huma.API, s *Server) {
@@ -69,7 +69,7 @@ func registerRoutes(api huma.API, s *Server) {
 		Body RouteRuleCreateRequest
 	}) (*struct{ Body RouteRuleResponse }, error) {
 		b := input.Body
-		enabled := b.Enabled
+		enabled := b.Enabled == nil || *b.Enabled
 		rule := config.RouteRule{
 			Priority:  b.Priority,
 			DestHost:  b.DestHost,
@@ -102,7 +102,7 @@ func registerRoutes(api huma.API, s *Server) {
 			return nil, huma.Error404NotFound(fmt.Sprintf("route index %d not found", input.Index))
 		}
 		b := input.Body
-		enabled := b.Enabled
+		enabled := b.Enabled == nil || *b.Enabled
 		rule := config.RouteRule{
 			Priority:  b.Priority,
 			DestHost:  b.DestHost,

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { Plus, Trash2, Edit3, RefreshCw, XCircle } from 'lucide-react'
+import { Plus, Trash2, Edit3, RefreshCw, XCircle, ToggleLeft, ToggleRight } from 'lucide-react'
 import Badge from '../components/Badge.jsx'
 import Spinner from '../components/Spinner.jsx'
 import Modal from '../components/Modal.jsx'
@@ -103,8 +103,16 @@ function RouteRulesTab() {
     const idx = rule.index
     setActionLoading(prev => ({ ...prev, [idx]: true }))
     try {
-      const { index: _i, ...ruleBody } = rule
-      await updateRoute(idx, { ...ruleBody, enabled: !rule.enabled })
+      const payload = {
+        priority: rule.priority,
+        action: rule.action,
+        enabled: !rule.enabled,
+      }
+      if (rule.dest_realm) payload.dest_realm = rule.dest_realm
+      if (rule.dest_host)  payload.dest_host  = rule.dest_host
+      if (rule.app_id)     payload.app_id     = rule.app_id
+      if (rule.lb_group)   payload.lb_group   = rule.lb_group
+      await updateRoute(idx, payload)
       toast.success(rule.enabled ? 'Rule disabled' : 'Rule enabled')
       refresh()
     } catch (err) {
@@ -177,7 +185,6 @@ function RouteRulesTab() {
                 <th>App ID</th>
                 <th>Action</th>
                 <th>Dest Host / LB Group</th>
-                <th>Enabled</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -199,18 +206,20 @@ function RouteRulesTab() {
                       {rule.dest_host || rule.lb_group || <span className="text-muted">—</span>}
                     </td>
                     <td>
-                      <label className="toggle">
-                        <input
-                          type="checkbox"
-                          checked={rule.enabled ?? true}
-                          disabled={actionLoading[idx]}
-                          onChange={() => handleToggle(rule)}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
-                    </td>
-                    <td>
                       <div className="flex gap-6">
+                        <button
+                          className="btn-icon"
+                          title={rule.enabled ?? true ? 'Disable rule' : 'Enable rule'}
+                          disabled={actionLoading[idx]}
+                          onClick={() => handleToggle(rule)}
+                        >
+                          {actionLoading[idx]
+                            ? <Spinner size="sm" />
+                            : (rule.enabled ?? true)
+                              ? <ToggleRight size={15} style={{ color: 'var(--success)' }} />
+                              : <ToggleLeft size={15} />
+                          }
+                        </button>
                         <button className="btn-icon" title="Edit"
                           onClick={() => { setEditTarget(rule); setShowModal(true) }}>
                           <Edit3 size={13} />
@@ -262,8 +271,15 @@ function RouteModal({ initial, lbGroups, onClose, onSaved }) {
     e.preventDefault()
     setSubmitting(true)
     try {
-      const { index: _i, ...formBody } = form
-      const payload = { ...formBody, priority: Number(form.priority), app_id: Number(form.app_id) }
+      const payload = {
+        priority: Number(form.priority),
+        action: form.action,
+        enabled: form.enabled ?? true,
+      }
+      if (form.dest_realm) payload.dest_realm = form.dest_realm
+      if (form.dest_host)  payload.dest_host  = form.dest_host
+      if (Number(form.app_id)) payload.app_id = Number(form.app_id)
+      if (form.lb_group)   payload.lb_group   = form.lb_group
       if (initial?.index != null) {
         await updateRoute(initial.index, payload)
         toast.success('Route rule updated')
