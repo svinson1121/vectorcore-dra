@@ -121,12 +121,20 @@ func zapMiddleware(log *zap.Logger) func(http.Handler) http.Handler {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()
 			next.ServeHTTP(ww, r)
-			log.Debug("http",
+			status := ww.Status()
+			fields := []zap.Field{
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
-				zap.Int("status", ww.Status()),
+				zap.Int("status", status),
 				zap.Duration("duration", time.Since(start)),
-			)
+			}
+			if status >= 500 {
+				log.Error("http", fields...)
+			} else if status >= 400 {
+				log.Warn("http", fields...)
+			} else {
+				log.Debug("http", fields...)
+			}
 		})
 	}
 }

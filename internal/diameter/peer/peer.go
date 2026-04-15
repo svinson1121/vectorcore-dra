@@ -54,8 +54,8 @@ type Config struct {
 	Port          int
 	Transport     transport.Transport
 	TransportName string // "tcp" | "tcp+tls" | "sctp" | "sctp+tls"
-	Mode          string // "active" | "passive"
-	PeerGroup     string // peer group name this peer belongs to
+	Mode    string // "active" | "passive"
+	LBGroup string // lb group name this peer belongs to
 	Weight        int    // for weighted load balancing
 
 	// Local DRA identity

@@ -64,31 +64,30 @@ watchdog:
   max_failures: 3
 
 # ---------------------------------------------------------------------------
-# Reconnect backoff - applies to active peers and DNS retry on failure
-# Exponential: initial -> initial*2 -> ... -> max
+# Reconnect backoff - applies to active peers only.
+# Exponential: initial -> initial*2 -> ... -> max, reset on successful CER/CEA.
 # ---------------------------------------------------------------------------
 reconnect:
   initial_backoff_seconds: 1
   max_backoff_seconds: 60
 
 # ---------------------------------------------------------------------------
-# Peer groups (optional)
-# Only needed if you want a non-default LB policy for a group.
-# Groups referenced in peers/routes but not listed here default to round_robin.
+# --- mutable config - hot-reloaded on file change, managed via REST API ---
 # ---------------------------------------------------------------------------
-peer_groups:
+
+# LB Groups (optional)
+# Only needed to set a non-default policy. Groups referenced in peers or routes
+# but not listed here are created automatically with round_robin when a peer joins.
+# Managed via: GET/POST /api/v1/lb-groups, PATCH/DELETE /api/v1/lb-groups/{name}
+lb_groups:
   - name: hss_group
-    lb_policy: round_robin    # round_robin | weighted | least_conn
+    lb_policy: round_robin    # round_robin | least_conn
 
   - name: pcrf_group
     lb_policy: least_conn
 
   - name: roaming_ipe
-    lb_policy: weighted
-
-# ---------------------------------------------------------------------------
-# --- mutable config - hot-reloaded on file change, managed via REST API ---
-# ---------------------------------------------------------------------------
+    lb_policy: round_robin
 
 # Peers
 # address: IP address or FQDN. FQDNs are resolved via DNS on each connect attempt.
@@ -97,7 +96,9 @@ peer_groups:
 #             Reconnects automatically using the reconnect backoff.
 #   passive - DRA waits for the peer to connect and responds with CEA.
 #             No reconnect - peer must re-initiate after disconnect.
+# lb_group: optional - assigns this peer to a named load-balancing group.
 # Security: only IPs listed here are accepted inbound. Unknown sources are dropped at accept.
+# Managed via: GET/POST /api/v1/peers, PATCH/DELETE /api/v1/peers/{name}
 peers:
   - name: hss01
     fqdn: hss01.epc.mnc435.mcc311.3gppnetwork.org
@@ -106,8 +107,7 @@ peers:
     transport: tcp            # tcp | tcp+tls | sctp | sctp+tls
     mode: active              # active = we connect | passive = they connect to us
     realm: epc.mnc435.mcc311.3gppnetwork.org
-    peer_group: hss_group
-    weight: 1
+    lb_group: hss_group
     enabled: true
 
   - name: hss02
@@ -117,8 +117,7 @@ peers:
     transport: tcp
     mode: active
     realm: epc.mnc435.mcc311.3gppnetwork.org
-    peer_group: hss_group
-    weight: 1
+    lb_group: hss_group
     enabled: true
 
   - name: pcrf01
@@ -128,8 +127,7 @@ peers:
     transport: sctp
     mode: active
     realm: epc.mnc435.mcc311.3gppnetwork.org
-    peer_group: pcrf_group
-    weight: 1
+    lb_group: pcrf_group
     enabled: true
 
   - name: mme01
@@ -139,8 +137,6 @@ peers:
     transport: tcp
     mode: passive             # MME connects to us; we respond with CEA
     realm: epc.mnc435.mcc311.3gppnetwork.org
-    peer_group: ""
-    weight: 1
     enabled: true
 
   - name: tmobile-ipe
@@ -150,39 +146,38 @@ peers:
     transport: tcp+tls
     mode: active
     realm: mnc260.mcc310.3gppnetwork.org
-    peer_group: roaming_ipe
-    weight: 10
+    lb_group: roaming_ipe
     enabled: true
 
 # IMSI prefix routing - evaluated BEFORE route_rules. Longest prefix wins.
 # Extracts IMSI from Subscription-Id AVP (Gx/Gy) or User-Name AVP (S6a/SWx).
-# On match: overwrites Destination-Realm and routes to the named peer_group.
+# On match: overwrites Destination-Realm and routes to the named lb_group.
 #
 # prefix: MCC+MNC digits only - 5 digits (2-digit MNC) or 6 digits (3-digit MNC).
 #   311435  -> MCC=311 MNC=435
 #   310260  -> MCC=310 MNC=260
-#   20416   -> MCC=204 MNC=16 (note: stored as 5 digits, leading zero dropped)
+#   20416   -> MCC=204 MNC=16 (note: 5 digits, leading zero dropped)
 #
 # dest_realm: the 3GPP realm for that network per TS 23.003:
 #   epc.mnc<MNC3>.mcc<MCC>.3gppnetwork.org   (MNC zero-padded to 3 digits)
+#
+# lb_group: optional - if omitted, implicit realm routing selects the peer.
+# Managed via: GET/POST /api/v1/imsi-routes, PUT/DELETE /api/v1/imsi-routes/{index}
 imsi_routes:
   - prefix: "311435"              # home: MCC=311 MNC=435
     dest_realm: "epc.mnc435.mcc311.3gppnetwork.org"
-    peer_group: hss_group
+    lb_group: hss_group
     priority: 10
-    enabled: true
 
   - prefix: "310260"              # T-Mobile US - roaming partner
     dest_realm: "epc.mnc260.mcc310.3gppnetwork.org"
-    peer_group: roaming_ipe
+    lb_group: roaming_ipe
     priority: 10
-    enabled: true
 
   - prefix: "20416"               # T-Mobile NL - 5-digit prefix (MCC=204 MNC=16)
     dest_realm: "epc.mnc016.mcc204.3gppnetwork.org"
-    peer_group: roaming_ipe
+    lb_group: roaming_ipe
     priority: 10
-    enabled: true
 
 # Route rules - OPTIONAL. Evaluated after IMSI routes.
 #
@@ -198,21 +193,21 @@ imsi_routes:
 #
 # priority: lower number = evaluated first
 # dest_realm: "" = wildcard; dest_host: "" = wildcard; app_id: 0 = any
+# dest_host: target peer FQDN to route to (takes precedence over lb_group)
+# lb_group: target group for load-balanced routing
 # action: route | reject | drop
+# Managed via: GET/POST /api/v1/routes, PUT/DELETE /api/v1/routes/{index}
 #
 # route_rules:
 #   - priority: 20
 #     dest_realm: epc.mnc435.mcc311.3gppnetwork.org
-#     app_id: 16777238          # Gx only -> override to PCRF group
-#     peer_group: pcrf_group
+#     app_id: 16777238          # Gx only -> route to PCRF group
+#     lb_group: pcrf_group
 #     action: route
-#     enabled: true
 #
 #   - priority: 50
 #     dest_realm: blocked.example.com
 #     action: reject
-#     enabled: true
 #
 #   - priority: 100
 #     action: reject            # catch-all: reject anything unmatched
-#     enabled: true

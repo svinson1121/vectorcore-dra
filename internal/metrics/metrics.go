@@ -44,7 +44,7 @@ var (
 	RouteHitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dra_route_hits_total",
 		Help: "Total route rule matches.",
-	}, []string{"peer_group", "app_id"})
+	}, []string{"lb_group", "app_id"})
 
 	RouteMissesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dra_route_misses_total",
@@ -55,7 +55,7 @@ var (
 	IMSIRouteHitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dra_imsi_route_hits_total",
 		Help: "Total IMSI prefix routing matches.",
-	}, []string{"prefix", "peer_group"})
+	}, []string{"prefix", "lb_group"})
 
 	ForwardedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dra_forwarded_total",

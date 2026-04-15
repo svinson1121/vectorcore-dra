@@ -16,7 +16,7 @@ type Config struct {
 	Logging    LoggingConfig    `yaml:"logging"`
 	Watchdog   WatchdogConfig   `yaml:"watchdog"`
 	Reconnect  ReconnectConfig  `yaml:"reconnect"`
-	PeerGroups []PeerGroup      `yaml:"peer_groups"` // optional: define LB policy per group
+	LBGroups   []LBGroup        `yaml:"lb_groups"`   // optional: define LB policy per group
 	Peers      []Peer           `yaml:"peers"`
 	IMSIRoutes []IMSIRoute      `yaml:"imsi_routes"`
 	RouteRules []RouteRule      `yaml:"route_rules"`
@@ -68,8 +68,8 @@ type ReconnectConfig struct {
 	MaxBackoffSeconds     int `yaml:"max_backoff_seconds"`
 }
 
-// PeerGroup defines a named group of peers with a shared load-balancing policy.
-type PeerGroup struct {
+// LBGroup defines a named group of peers with a shared load-balancing policy.
+type LBGroup struct {
 	Name     string `yaml:"name"`
 	LBPolicy string `yaml:"lb_policy"` // round_robin | weighted | least_conn
 }
@@ -83,31 +83,32 @@ type Peer struct {
 	Transport string `yaml:"transport"` // tcp | tcp+tls | sctp | sctp+tls
 	Mode      string `yaml:"mode"`      // active (we connect) | passive (we wait)
 	Realm     string `yaml:"realm"`
-	PeerGroup string `yaml:"peer_group"` // name of the PeerGroup this peer belongs to
+	LBGroup   string `yaml:"lb_group"`   // name of the LBGroup this peer belongs to
 	Weight    int    `yaml:"weight"`
 	Enabled   bool   `yaml:"enabled"`
 }
 
 // IMSIRoute maps an IMSI MCC+MNC prefix to a destination realm and peer group.
-// Evaluated before all other routing tiers. Longest prefix wins.
+// Evaluated after explicit route_rules. Longest prefix wins.
 type IMSIRoute struct {
 	Prefix    string `yaml:"prefix"`     // e.g. "311435" (MCC=311 MNC=435)
 	DestRealm string `yaml:"dest_realm"` // e.g. "epc.mnc435.mcc311.3gppnetwork.org"
-	PeerGroup string `yaml:"peer_group"`
+	LBGroup   string `yaml:"lb_group"`
 	Priority  int    `yaml:"priority"`
-	Enabled   bool   `yaml:"enabled"`
+	// Enabled defaults to true when omitted from config. Set to false to disable.
+	Enabled *bool `yaml:"enabled"`
 }
 
 // RouteRule describes a single routing rule.
 type RouteRule struct {
 	Priority  int    `yaml:"priority"`
-	DestHost  string `yaml:"dest_host"`  // "" = wildcard
-	DestRealm string `yaml:"dest_realm"` // "" = wildcard
-	AppID     uint32 `yaml:"app_id"`     // 0 = any
-	PeerGroup string `yaml:"peer_group"` // peer group name; "" = any open peer
-	Peer      string `yaml:"peer"`       // specific peer FQDN for static routing; "" = auto-select
-	Action    string `yaml:"action"`     // route | reject | drop
-	Enabled   bool   `yaml:"enabled"`
+	DestHost  string `yaml:"dest_host,omitempty"` // "" = wildcard; matched against Destination-Host AVP
+	DestRealm string `yaml:"dest_realm"`          // "" = catch-all default route
+	AppID     uint32 `yaml:"app_id"`              // 0 = any
+	LBGroup   string `yaml:"lb_group,omitempty"`  // lb group to route to; omitted = auto-select
+	Action    string `yaml:"action"`                // route | reject | drop
+	// Enabled defaults to true when omitted from config. Set to false to disable.
+	Enabled *bool `yaml:"enabled"`
 }
 
 // Load reads and parses a YAML config file at path.

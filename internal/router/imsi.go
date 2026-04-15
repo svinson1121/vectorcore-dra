@@ -8,12 +8,12 @@ import (
 	"github.com/svinson1121/vectorcore-dra/internal/diameter/message"
 )
 
-// IMSIRoute maps an IMSI MCC+MNC prefix to a destination realm and peer group.
+// IMSIRoute maps an IMSI MCC+MNC prefix to a destination realm and lb group.
 // Mirrors config.IMSIRoute but lives in the router package to avoid import cycles.
 type IMSIRoute struct {
 	Prefix    string // e.g. "311435" (MCC=311 MNC=435)
 	DestRealm string
-	PeerGroup string
+	LBGroup   string
 	Priority  int
 	Enabled   bool
 }

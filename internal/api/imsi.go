@@ -15,7 +15,7 @@ type IMSIRouteResponse struct {
 	Index     int    `json:"index"`
 	Prefix    string `json:"prefix"`
 	DestRealm string `json:"dest_realm"`
-	PeerGroup string `json:"peer_group"`
+	LBGroup   string `json:"lb_group"`
 	Priority  int    `json:"priority"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -23,7 +23,7 @@ type IMSIRouteResponse struct {
 type IMSIRouteCreateRequest struct {
 	Prefix    string `json:"prefix"     required:"true"  minLength:"5" maxLength:"6"`
 	DestRealm string `json:"dest_realm" required:"true"`
-	PeerGroup string `json:"peer_group" required:"true"`
+	LBGroup   string `json:"lb_group"   required:"false"`
 	Priority  int    `json:"priority"   required:"false" default:"10"`
 	Enabled   bool   `json:"enabled"    required:"false" default:"true"`
 }
@@ -66,12 +66,13 @@ func registerIMSIRoutes(api huma.API, s *Server) {
 		Body IMSIRouteCreateRequest
 	}) (*struct{ Body IMSIRouteResponse }, error) {
 		b := input.Body
+		enabled := b.Enabled
 		route := config.IMSIRoute{
 			Prefix:    b.Prefix,
 			DestRealm: b.DestRealm,
-			PeerGroup: b.PeerGroup,
+			LBGroup:   b.LBGroup,
 			Priority:  b.Priority,
-			Enabled:   b.Enabled,
+			Enabled:   &enabled,
 		}
 		s.cfg.IMSIRoutes = append(s.cfg.IMSIRoutes, route)
 		if err := s.saveConfig(); err != nil {
@@ -96,12 +97,13 @@ func registerIMSIRoutes(api huma.API, s *Server) {
 			return nil, huma.Error404NotFound(fmt.Sprintf("IMSI route index %d not found", input.Index))
 		}
 		b := input.Body
+		enabled := b.Enabled
 		route := config.IMSIRoute{
 			Prefix:    b.Prefix,
 			DestRealm: b.DestRealm,
-			PeerGroup: b.PeerGroup,
+			LBGroup:   b.LBGroup,
 			Priority:  b.Priority,
-			Enabled:   b.Enabled,
+			Enabled:   &enabled,
 		}
 		s.cfg.IMSIRoutes[input.Index] = route
 		if err := s.saveConfig(); err != nil {
@@ -137,9 +139,9 @@ func imsiToResponse(i int, r config.IMSIRoute) IMSIRouteResponse {
 		Index:     i,
 		Prefix:    r.Prefix,
 		DestRealm: r.DestRealm,
-		PeerGroup: r.PeerGroup,
+		LBGroup:   r.LBGroup,
 		Priority:  r.Priority,
-		Enabled:   r.Enabled,
+		Enabled:   r.Enabled == nil || *r.Enabled,
 	}
 }
 
@@ -149,9 +151,9 @@ func configIMSIToRouterIMSILocal(cfgRoutes []config.IMSIRoute) []router.IMSIRout
 		routes = append(routes, router.IMSIRoute{
 			Prefix:    r.Prefix,
 			DestRealm: r.DestRealm,
-			PeerGroup: r.PeerGroup,
+			LBGroup:   r.LBGroup,
 			Priority:  r.Priority,
-			Enabled:   r.Enabled,
+			Enabled:   r.Enabled == nil || *r.Enabled,
 		})
 	}
 	return routes

@@ -64,18 +64,18 @@ func (r *Router) UpdateIMSIRoutes(routes []IMSIRoute) {
 	r.log.Info("IMSI routes updated", zap.Int("count", len(table)))
 }
 
-// SetGroupPolicy sets the load-balancing policy for a peer group.
-// Called from peermgr when syncing peer group config.
-func (r *Router) SetGroupPolicy(group, policy string) {
+// SetGroupPolicy sets the load-balancing policy for an lb group.
+// Called from peermgr when syncing lb group config.
+func (r *Router) SetGroupPolicy(lbGroup, policy string) {
 	r.mu.Lock()
-	r.groupLB[group] = NewSelector(policy)
+	r.groupLB[lbGroup] = NewSelector(policy)
 	r.mu.Unlock()
 }
 
 // AddPeer registers a peer in the routing table.
 func (r *Router) AddPeer(p *peer.Peer) {
 	fqdn := p.Cfg().FQDN
-	peerGroup := p.Cfg().PeerGroup
+	lbGroup := p.Cfg().LBGroup
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,9 +85,9 @@ func (r *Router) AddPeer(p *peer.Peer) {
 	}
 	r.peers[fqdn] = p
 
-	if peerGroup != "" {
+	if lbGroup != "" {
 		// Add to group if not already present
-		fqdns := r.groups[peerGroup]
+		fqdns := r.groups[lbGroup]
 		found := false
 		for _, f := range fqdns {
 			if f == fqdn {
@@ -96,15 +96,15 @@ func (r *Router) AddPeer(p *peer.Peer) {
 			}
 		}
 		if !found {
-			r.groups[peerGroup] = append(fqdns, fqdn)
+			r.groups[lbGroup] = append(fqdns, fqdn)
 		}
 		// Ensure group has a selector
-		if _, ok := r.groupLB[peerGroup]; !ok {
-			r.groupLB[peerGroup] = NewSelector("round_robin")
+		if _, ok := r.groupLB[lbGroup]; !ok {
+			r.groupLB[lbGroup] = NewSelector("round_robin")
 		}
 	}
 
-	r.log.Debug("peer added to router", zap.String("fqdn", fqdn), zap.String("group", peerGroup))
+	r.log.Debug("peer added to router", zap.String("fqdn", fqdn), zap.String("lb_group", lbGroup))
 }
 
 // RemovePeer unregisters a peer by FQDN.
@@ -117,10 +117,10 @@ func (r *Router) RemovePeer(fqdn string) {
 	}
 	delete(r.peers, fqdn)
 
-	// Remove from peer group
-	peerGroup := p.Cfg().PeerGroup
-	if peerGroup != "" {
-		fqdns := r.groups[peerGroup]
+	// Remove from lb group
+	lbGroup := p.Cfg().LBGroup
+	if lbGroup != "" {
+		fqdns := r.groups[lbGroup]
 		filtered := fqdns[:0]
 		for _, f := range fqdns {
 			if f != fqdn {
@@ -128,9 +128,9 @@ func (r *Router) RemovePeer(fqdn string) {
 			}
 		}
 		if len(filtered) == 0 {
-			delete(r.groups, peerGroup)
+			delete(r.groups, lbGroup)
 		} else {
-			r.groups[peerGroup] = filtered
+			r.groups[lbGroup] = filtered
 		}
 	}
 
@@ -142,11 +142,10 @@ func (r *Router) RemovePeer(fqdn string) {
 // excluded from all candidate sets so the DRA never routes a request back to
 // the peer it came from.
 // Routing tiers (first match wins):
-//  1. IMSI prefix - extract IMSI, match prefix table -> set Destination-Realm, route to group
-//  2. Explicit host - Destination-Host matches a peer FQDN exactly
-//  3. Realm + AppID - Destination-Realm + AppID match a route rule
-//  4. Realm only - Destination-Realm matches, any AppID
-//  5. Default - catch-all (empty dest_realm)
+//  1. Destination-Host AVP in message - route directly, no rule evaluation
+//  2. Explicit route_rules - match on dest_realm + app_id, route to dest_host peer or lb_group
+//  3. IMSI prefix - derive Destination-Realm from IMSI, route to peer group
+//  4. Implicit realm - Destination-Realm matches any OPEN peer's configured realm
 func (r *Router) Route(msg *message.Message, fromFQDN string) (*peer.Peer, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -164,37 +163,44 @@ func (r *Router) Route(msg *message.Message, fromFQDN string) (*peer.Peer, error
 	destRealm := avpString(msg, avp.CodeDestinationRealm, 0)
 	appID := msg.Header.AppID
 
-	// --- Tier 1: IMSI prefix routing ---
-	if imsi := extractIMSI(msg); imsi != "" {
-		if route, ok := r.imsiRoutes.match(imsi); ok {
-			r.log.Debug("IMSI route matched",
-				zap.String("imsi_prefix", route.Prefix),
-				zap.String("dest_realm", route.DestRealm),
-				zap.String("peer_group", route.PeerGroup),
-			)
-			// Override dest_realm for subsequent rule evaluation
-			destRealm = route.DestRealm
-			// Route directly to the peer group
-			if p := r.selectFromGroup(route.PeerGroup, appID, destRealm, fromFQDN, msg); p != nil {
+	// Determine the source peer's group so implicit routing excludes the entire
+	// group, not just the individual peer. This prevents S6a requests from one
+	// MME being routed back to another MME in the same group.
+	fromGroup := ""
+	if src, ok := r.peers[fromFQDN]; ok {
+		fromGroup = src.Cfg().LBGroup
+	}
+
+	// --- Tier 1: Destination-Host in the message ---
+	// If the message carries a Destination-Host AVP, route directly to that peer.
+	// No rule evaluation, no load balancing - the originator made an explicit
+	// routing decision and overriding it would break mid-session flows (RAR, IDR,
+	// ASR, CCR-U, etc.). This is evaluated before everything else.
+	if destHost != "" {
+		if p, ok := r.peers[destHost]; ok && destHost != fromFQDN {
+			if p.State() == peer.StateOpen {
+				r.log.Debug("dest-host route",
+					zap.String("dest_host", destHost),
+					zap.String("peer", p.Cfg().Name),
+				)
 				return p, nil
 			}
-			r.log.Warn("IMSI route matched but no open peer in group",
-				zap.String("prefix", route.Prefix),
-				zap.String("group", route.PeerGroup),
+			r.log.Warn("dest-host peer not open",
+				zap.String("dest_host", destHost),
 			)
-			// Fall through to rule-based routing with the overridden destRealm
+			return nil, ErrNoPeer
 		}
 	}
 
-	// --- Tiers 2-4: explicit route_rules (optional) ---
-	// route_rules are only needed for: explicit rejects, routing a realm to a
-	// specific peer group, or a catch-all default action. Normal realm routing
-	// works without any rules via the implicit tier below.
+	// --- Tier 2: explicit route_rules ---
+	// Static rules evaluated in ascending priority order; first match wins.
+	// Match conditions: dest_realm and app_id.
+	// Routing target (in order of precedence):
+	//   dest_host set   -> route to that specific peer
+	//   lb_group set    -> load-balance across the group
+	//   neither set     -> route to any OPEN peer whose realm matches
 	for _, rule := range r.rules {
 		if !rule.Enabled {
-			continue
-		}
-		if rule.DestHost != "" && rule.DestHost != destHost {
 			continue
 		}
 		if rule.DestRealm != "" && rule.DestRealm != destRealm {
@@ -212,29 +218,37 @@ func (r *Router) Route(msg *message.Message, fromFQDN string) (*peer.Peer, error
 			r.log.Debug("route dropped by rule", zap.Int("priority", rule.Priority))
 			return nil, ErrDrop
 		case "route":
-			if rule.Peer != "" {
-				p, ok := r.peers[rule.Peer]
+			if rule.DestHost != "" {
+				// dest_host in the rule is the routing target - the peer FQDN to send to.
+				p, ok := r.peers[rule.DestHost]
 				if !ok || p.State() != peer.StateOpen {
-					r.log.Warn("static route peer not open", zap.String("peer", rule.Peer))
-					return nil, ErrNoPeer
+					r.log.Warn("rule dest_host peer not open, trying next rule",
+						zap.String("dest_host", rule.DestHost),
+						zap.Int("priority", rule.Priority),
+					)
+					continue
 				}
+				r.log.Debug("rule routed to dest_host peer",
+					zap.String("dest_host", rule.DestHost),
+					zap.Int("priority", rule.Priority),
+				)
 				return p, nil
 			}
-			if rule.PeerGroup != "" {
-				if p := r.selectFromGroup(rule.PeerGroup, appID, destRealm, fromFQDN, msg); p != nil {
-					r.log.Debug("rule route selected",
-						zap.String("group", rule.PeerGroup),
+			if rule.LBGroup != "" {
+				if p := r.selectFromGroup(rule.LBGroup, appID, destRealm, fromFQDN, msg, false); p != nil {
+					r.log.Debug("rule routed to lb group",
+						zap.String("lb_group", rule.LBGroup),
 						zap.Int("priority", rule.Priority),
 					)
 					return p, nil
 				}
-				r.log.Warn("no open peers in group, trying next rule",
-					zap.String("group", rule.PeerGroup),
+				r.log.Warn("no open peers in lb group, trying next rule",
+					zap.String("lb_group", rule.LBGroup),
 					zap.Int("priority", rule.Priority),
 				)
 				continue
 			}
-			candidates := r.allCandidates(appID, destRealm, fromFQDN)
+			candidates := r.allCandidates(appID, destRealm, fromFQDN, fromGroup)
 			if len(candidates) == 0 {
 				continue
 			}
@@ -245,34 +259,34 @@ func (r *Router) Route(msg *message.Message, fromFQDN string) (*peer.Peer, error
 		}
 	}
 
-	// --- Tier 4b: implicit Destination-Host routing ---
-	// If Destination-Host is set and matches a configured peer FQDN exactly,
-	// route directly to that peer. This handles server-initiated requests (e.g.
-	// RAR from HSS targeting a specific MME) that carry no route rules but do
-	// carry an explicit Destination-Host. Mirrors freeDiameter routing_dispatch.c
-	// behaviour: explicit host match is always tried before realm-only fallback.
-	if destHost != "" {
-		if p, ok := r.peers[destHost]; ok && destHost != fromFQDN {
-			if p.State() == peer.StateOpen {
-				r.log.Debug("implicit dest-host route",
-					zap.String("dest_host", destHost),
-					zap.String("peer", p.Cfg().Name),
-				)
+	// --- Tier 2: IMSI prefix routing ---
+	// Only reached when no explicit route_rule matched. Extracts IMSI from the
+	// message, derives the Destination-Realm, and routes to the configured lb group.
+	if imsi := extractIMSI(msg); imsi != "" {
+		if route, ok := r.imsiRoutes.match(imsi); ok {
+			r.log.Debug("IMSI route matched",
+				zap.String("imsi_prefix", route.Prefix),
+				zap.String("dest_realm", route.DestRealm),
+				zap.String("lb_group", route.LBGroup),
+			)
+			imsiRealm := route.DestRealm
+			if p := r.selectFromGroup(route.LBGroup, appID, imsiRealm, fromFQDN, msg, true); p != nil {
 				return p, nil
 			}
-			r.log.Warn("implicit dest-host peer not open",
-				zap.String("dest_host", destHost),
+			r.log.Warn("IMSI route matched but no open peer in lb group",
+				zap.String("prefix", route.Prefix),
+				zap.String("lb_group", route.LBGroup),
 			)
-			return nil, ErrNoPeer
+			// Fall through to implicit routing with the IMSI-derived realm.
+			destRealm = imsiRealm
 		}
 	}
 
-	// --- Tier 5: implicit realm routing (no route_rules required) ---
+	// --- Tier 4: implicit realm routing ---
 	// Route Destination-Realm to any OPEN peer whose configured realm matches.
-	// This mirrors freeDiameter's default behaviour - peers declare their realm
-	// in config and CER, and the DRA routes to them automatically.
+	// fromGroup is excluded so requests are never routed back to the source peer group.
 	if destRealm != "" {
-		candidates := r.allCandidates(appID, destRealm, fromFQDN)
+		candidates := r.allCandidates(appID, destRealm, fromFQDN, fromGroup)
 		if len(candidates) > 0 {
 			if p := r.defaultSelector().Select(candidates, msg); p != nil {
 				r.log.Debug("implicit realm route",
@@ -284,12 +298,22 @@ func (r *Router) Route(msg *message.Message, fromFQDN string) (*peer.Peer, error
 		}
 	}
 
+	r.log.Warn("no route found",
+		zap.String("dest_host", destHost),
+		zap.String("dest_realm", destRealm),
+		zap.Uint32("app_id", appID),
+		zap.String("from", fromFQDN),
+	)
 	return nil, ErrNoRoute
 }
 
 // selectFromGroup picks an open peer from the named group that supports appID.
 // excludeFQDN is skipped (the peer that originated the request).
-func (r *Router) selectFromGroup(group string, appID uint32, destRealm string, excludeFQDN string, msg *message.Message) *peer.Peer {
+// filterByRealm controls whether p.PeerRealm must match destRealm. Pass true for
+// IMSI-derived routing (where the realm was just computed and must match exactly),
+// false for explicit rule-driven routing (operator chose the group; realm filter
+// could silently exclude all peers if CER-advertised realm differs from Destination-Realm).
+func (r *Router) selectFromGroup(group string, appID uint32, destRealm string, excludeFQDN string, msg *message.Message, filterByRealm bool) *peer.Peer {
 	fqdns := r.groups[group]
 	if len(fqdns) == 0 {
 		return nil
@@ -303,7 +327,7 @@ func (r *Router) selectFromGroup(group string, appID uint32, destRealm string, e
 		if !ok || p.State() != peer.StateOpen {
 			continue
 		}
-		if destRealm != "" && p.PeerRealm != destRealm {
+		if filterByRealm && destRealm != "" && p.PeerRealm != destRealm {
 			continue
 		}
 		if appID != 0 && appID != AppRelayAgent && !peerSupportsApp(p, appID) {
@@ -322,11 +346,16 @@ func (r *Router) selectFromGroup(group string, appID uint32, destRealm string, e
 }
 
 // allCandidates returns all OPEN peers eligible for appID and destRealm,
-// excluding excludeFQDN (the peer that originated the request).
-func (r *Router) allCandidates(appID uint32, destRealm string, excludeFQDN string) []*peer.Peer {
+// excluding excludeFQDN (the originating peer) and all peers in excludeGroup
+// (the originating peer's group). Excluding the whole group prevents requests
+// from being routed back to a peer of the same type (e.g. MME -> MME).
+func (r *Router) allCandidates(appID uint32, destRealm string, excludeFQDN string, excludeGroup string) []*peer.Peer {
 	var out []*peer.Peer
 	for fqdn, p := range r.peers {
 		if fqdn == excludeFQDN {
+			continue
+		}
+		if excludeGroup != "" && p.Cfg().LBGroup == excludeGroup {
 			continue
 		}
 		if p.State() != peer.StateOpen {
@@ -347,8 +376,13 @@ func (r *Router) defaultSelector() Selector {
 	return &roundRobinSelector{}
 }
 
-// peerSupportsApp returns true if p advertises appID or the relay application.
+// peerSupportsApp returns true if p advertises appID or the relay application,
+// or if the peer has no advertised app IDs at all (relay-only peer or CER not
+// yet captured - assume capable rather than silently blackholing traffic).
 func peerSupportsApp(p *peer.Peer, appID uint32) bool {
+	if len(p.PeerAppIDs) == 0 {
+		return true
+	}
 	for _, id := range p.PeerAppIDs {
 		if id == appID || id == AppRelayAgent {
 			return true

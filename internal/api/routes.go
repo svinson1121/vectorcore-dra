@@ -17,8 +17,7 @@ type RouteRuleResponse struct {
 	DestHost  string `json:"dest_host"`
 	DestRealm string `json:"dest_realm"`
 	AppID     uint32 `json:"app_id"`
-	PeerGroup string `json:"peer_group"`
-	Peer      string `json:"peer"`
+	LBGroup   string `json:"lb_group"`
 	Action    string `json:"action"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -28,8 +27,7 @@ type RouteRuleCreateRequest struct {
 	DestHost  string `json:"dest_host"  required:"false"`
 	DestRealm string `json:"dest_realm" required:"false"`
 	AppID     uint32 `json:"app_id"     required:"false"`
-	PeerGroup string `json:"peer_group" required:"false"`
-	Peer      string `json:"peer"       required:"false"`
+	LBGroup   string `json:"lb_group"   required:"false"`
 	Action    string `json:"action"     required:"true" enum:"route,reject,drop"`
 	Enabled   bool   `json:"enabled"    required:"false" default:"true"`
 }
@@ -71,15 +69,15 @@ func registerRoutes(api huma.API, s *Server) {
 		Body RouteRuleCreateRequest
 	}) (*struct{ Body RouteRuleResponse }, error) {
 		b := input.Body
+		enabled := b.Enabled
 		rule := config.RouteRule{
 			Priority:  b.Priority,
 			DestHost:  b.DestHost,
 			DestRealm: b.DestRealm,
 			AppID:     b.AppID,
-			PeerGroup: b.PeerGroup,
-			Peer:      b.Peer,
+			LBGroup:   b.LBGroup,
 			Action:    b.Action,
-			Enabled:   b.Enabled,
+			Enabled:   &enabled,
 		}
 		s.cfg.RouteRules = append(s.cfg.RouteRules, rule)
 		if err := s.saveConfig(); err != nil {
@@ -104,15 +102,15 @@ func registerRoutes(api huma.API, s *Server) {
 			return nil, huma.Error404NotFound(fmt.Sprintf("route index %d not found", input.Index))
 		}
 		b := input.Body
+		enabled := b.Enabled
 		rule := config.RouteRule{
 			Priority:  b.Priority,
 			DestHost:  b.DestHost,
 			DestRealm: b.DestRealm,
 			AppID:     b.AppID,
-			PeerGroup: b.PeerGroup,
-			Peer:      b.Peer,
+			LBGroup:   b.LBGroup,
 			Action:    b.Action,
-			Enabled:   b.Enabled,
+			Enabled:   &enabled,
 		}
 		s.cfg.RouteRules[input.Index] = rule
 		if err := s.saveConfig(); err != nil {
@@ -150,10 +148,9 @@ func routeToResponse(i int, r config.RouteRule) RouteRuleResponse {
 		DestHost:  r.DestHost,
 		DestRealm: r.DestRealm,
 		AppID:     r.AppID,
-		PeerGroup: r.PeerGroup,
-		Peer:      r.Peer,
+		LBGroup:   r.LBGroup,
 		Action:    r.Action,
-		Enabled:   r.Enabled,
+		Enabled:   r.Enabled == nil || *r.Enabled,
 	}
 }
 
@@ -165,10 +162,9 @@ func configRulesToRouterRulesLocal(cfgRules []config.RouteRule) []router.Rule {
 			DestHost:  r.DestHost,
 			DestRealm: r.DestRealm,
 			AppID:     r.AppID,
-			PeerGroup: r.PeerGroup,
-			Peer:      r.Peer,
+			LBGroup:   r.LBGroup,
 			Action:    r.Action,
-			Enabled:   r.Enabled,
+			Enabled:   r.Enabled == nil || *r.Enabled,
 		})
 	}
 	return rules

@@ -61,9 +61,9 @@ type PeerResponse struct {
 	Transport string `json:"transport"`
 	Mode      string `json:"mode"`
 	Realm     string `json:"realm"`
-	PeerGroup string `json:"peer_group"`
-	Weight    int    `json:"weight"`
-	Enabled   bool   `json:"enabled"`
+	LBGroup  string `json:"lb_group"`
+	Weight   int    `json:"weight"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // PeerStatusResponse is the live connection state for a peer.
@@ -92,9 +92,9 @@ type PeerCreateRequest struct {
 	Transport string `json:"transport" required:"true" enum:"tcp,tcp+tls,sctp,sctp+tls"`
 	Mode      string `json:"mode"      required:"false" enum:"active,passive" default:"active"`
 	Realm     string `json:"realm"     required:"true"`
-	PeerGroup string `json:"peer_group" required:"false"`
-	Weight    int    `json:"weight"    required:"false" default:"1"`
-	Enabled   bool   `json:"enabled"   required:"false" default:"true"`
+	LBGroup  string `json:"lb_group"  required:"false"`
+	Weight   int    `json:"weight"    required:"false" default:"1"`
+	Enabled  bool   `json:"enabled"   required:"false" default:"true"`
 }
 
 // PeerPatchRequest is the body for PATCH /api/v1/peers/{name}.
@@ -107,7 +107,7 @@ type PeerPatchRequest struct {
 	Transport *string `json:"transport,omitempty" enum:"tcp,tcp+tls,sctp,sctp+tls"`
 	Mode      *string `json:"mode,omitempty"    enum:"active,passive"`
 	Realm     *string `json:"realm,omitempty"`
-	PeerGroup *string `json:"peer_group,omitempty"`
+	LBGroup   *string `json:"lb_group,omitempty"`
 	Weight    *int    `json:"weight,omitempty"`
 	Enabled   *bool   `json:"enabled,omitempty"`
 }
@@ -200,7 +200,7 @@ func registerPeers(api huma.API, s *Server) {
 			Transport: b.Transport,
 			Mode:      mode,
 			Realm:     b.Realm,
-			PeerGroup: b.PeerGroup,
+			LBGroup:   b.LBGroup,
 			Weight:    weight,
 			Enabled:   b.Enabled,
 		}
@@ -257,8 +257,8 @@ func registerPeers(api huma.API, s *Server) {
 			if b.Realm != nil {
 				s.cfg.Peers[i].Realm = *b.Realm
 			}
-			if b.PeerGroup != nil {
-				s.cfg.Peers[i].PeerGroup = *b.PeerGroup
+			if b.LBGroup != nil {
+				s.cfg.Peers[i].LBGroup = *b.LBGroup
 			}
 			if b.Weight != nil {
 				s.cfg.Peers[i].Weight = *b.Weight
@@ -337,7 +337,7 @@ func configPeerResponse(c config.Peer) PeerResponse {
 		Transport: c.Transport,
 		Mode:      mode,
 		Realm:     c.Realm,
-		PeerGroup: c.PeerGroup,
+		LBGroup:   c.LBGroup,
 		Weight:    weight,
 		Enabled:   c.Enabled,
 	}

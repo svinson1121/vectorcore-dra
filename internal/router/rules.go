@@ -5,11 +5,10 @@ import "sort"
 // Rule is a compiled routing rule evaluated against incoming Diameter messages.
 type Rule struct {
 	Priority  int
-	DestHost  string // "" = wildcard
-	DestRealm string // "" = wildcard
-	AppID     uint32 // 0 = wildcard
-	PeerGroup string // peer group name; "" = any open peer
-	Peer      string // specific peer FQDN for static routing; "" = auto-select
+	DestRealm string // match condition: "" = wildcard
+	AppID     uint32 // match condition: 0 = wildcard
+	DestHost string // routing target: specific peer FQDN; "" = use LBGroup
+	LBGroup  string // routing target: lb group name; "" = auto-select
 	Action    string // "route", "reject", "drop"
 	Enabled   bool
 }

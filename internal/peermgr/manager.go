@@ -321,7 +321,7 @@ func (m *Manager) startPeerLocked(
 		Transport:        t,
 		TransportName:    cfg.Transport,
 		Mode:             mode,
-		PeerGroup:        cfg.PeerGroup,
+		LBGroup:          cfg.LBGroup,
 		Weight:           cfg.Weight,
 		LocalFQDN:        localCfg.Identity,
 		LocalRealm:       localCfg.Realm,

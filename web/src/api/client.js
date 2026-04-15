@@ -15,7 +15,11 @@ async function request(method, path, body) {
     let msg = `HTTP ${res.status}`
     try {
       const data = await res.json()
-      msg = data.detail || data.message || data.error || msg
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        msg = data.errors.map(e => `${e.path ?? ''}: ${e.message ?? e}`).join('; ')
+      } else {
+        msg = data.detail || data.message || data.error || msg
+      }
     } catch {
       // ignore parse error
     }
@@ -32,11 +36,11 @@ export const createPeer = (data) => request('POST', '/peers', data)
 export const updatePeer = (name, data) => request('PATCH', `/peers/${encodeURIComponent(name)}`, data)
 export const deletePeer = (name) => request('DELETE', `/peers/${encodeURIComponent(name)}`)
 
-// ---------- Peer Groups ----------
-export const getPeerGroups = () => request('GET', '/peer-groups')
-export const createPeerGroup = (data) => request('POST', '/peer-groups', data)
-export const updatePeerGroup = (name, data) => request('PATCH', `/peer-groups/${encodeURIComponent(name)}`, data)
-export const deletePeerGroup = (name) => request('DELETE', `/peer-groups/${encodeURIComponent(name)}`)
+// ---------- LB Groups ----------
+export const getLBGroups = () => request('GET', '/lb-groups')
+export const createLBGroup = (data) => request('POST', '/lb-groups', data)
+export const updateLBGroup = (name, data) => request('PATCH', `/lb-groups/${encodeURIComponent(name)}`, data)
+export const deleteLBGroup = (name) => request('DELETE', `/lb-groups/${encodeURIComponent(name)}`)
 
 // ---------- Route Rules ----------
 export const getRoutes = () => request('GET', '/routes')

@@ -5,7 +5,7 @@ import Modal from '../components/Modal.jsx'
 import Spinner from '../components/Spinner.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { usePoller } from '../hooks/usePoller.js'
-import { getPeers, getPeerStatus, createPeer, updatePeer, deletePeer } from '../api/client.js'
+import { getPeers, getPeerStatus, createPeer, updatePeer, deletePeer, getLBGroups } from '../api/client.js'
 
 const APP_ID_NAMES = {
   0: 'Common', 1: 'NASREQ', 2: 'MobileIPv4', 3: 'BaseAcct', 4: 'DCCA',
@@ -18,7 +18,7 @@ function appName(id) { return APP_ID_NAMES[id] || String(id) }
 
 const EMPTY_FORM = {
   name: '', fqdn: '', address: '', port: 3868,
-  transport: 'tcp', mode: 'active', realm: '', peer_group: '', weight: 1, enabled: true,
+  transport: 'tcp', mode: 'active', realm: '', lb_group: '', enabled: true,
 }
 
 export default function Peers() {
@@ -31,6 +31,9 @@ export default function Peers() {
   // Live status — fast poll
   const { data: statusList, error: statusErr, refresh: refreshStatus } =
     usePoller(getPeerStatus, 5000)
+
+  // LB groups for select dropdowns in add/edit modals
+  const { data: lbGroups } = usePoller(getLBGroups, 30000)
 
   const refresh = useCallback(() => { refreshPeers(); refreshStatus() }, [refreshPeers, refreshStatus])
 
@@ -241,6 +244,7 @@ export default function Peers() {
 
       {showAdd && (
         <AddPeerModal
+          lbGroups={Array.isArray(lbGroups) ? lbGroups : []}
           onClose={() => setShowAdd(false)}
           onCreated={() => { setShowAdd(false); refresh() }}
         />
@@ -249,6 +253,7 @@ export default function Peers() {
       {editTarget && (
         <EditPeerModal
           peer={editTarget}
+          lbGroups={Array.isArray(lbGroups) ? lbGroups : []}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); refresh() }}
         />
@@ -290,6 +295,22 @@ export default function Peers() {
         </Modal>
       )}
     </div>
+  )
+}
+
+function LBGroupSelect({ value, onChange, lbGroups }) {
+  const groups = Array.isArray(lbGroups) ? lbGroups : []
+  const valueInList = groups.some(g => g.name === value)
+  return (
+    <select className="select" value={value} onChange={e => onChange(e.target.value)}>
+      <option value="">-- none --</option>
+      {groups.map(g => (
+        <option key={g.name} value={g.name}>{g.name}</option>
+      ))}
+      {value && !valueInList && (
+        <option value={value}>{value} (not in list)</option>
+      )}
+    </select>
   )
 }
 
@@ -336,12 +357,8 @@ function PeerDetails({ peer, status }) {
         </div>
       )}
       <div className="expanded-field">
-        <div className="expanded-label">Peer Group</div>
-        <div className="expanded-value">{peer.peer_group || '—'}</div>
-      </div>
-      <div className="expanded-field">
-        <div className="expanded-label">Weight</div>
-        <div className="expanded-value">{peer.weight ?? 1}</div>
+        <div className="expanded-label">LB Group</div>
+        <div className="expanded-value">{peer.lb_group || '—'}</div>
       </div>
       {status?.connected_at && (
         <div className="expanded-field">
@@ -363,18 +380,17 @@ function PeerDetails({ peer, status }) {
   )
 }
 
-function EditPeerModal({ peer, onClose, onSaved }) {
+function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState({
-    fqdn:       peer.fqdn       || '',
-    address:    peer.address    || '',
-    port:       peer.port       || 3868,
-    transport:  peer.transport  || 'tcp',
-    mode:       peer.mode       || 'active',
-    realm:      peer.realm      || '',
-    peer_group: peer.peer_group || '',
-    weight:     peer.weight     ?? 1,
-    enabled:    peer.enabled    ?? true,
+    fqdn:      peer.fqdn      || '',
+    address:   peer.address   || '',
+    port:      peer.port      || 3868,
+    transport: peer.transport || 'tcp',
+    mode:      peer.mode      || 'active',
+    realm:     peer.realm     || '',
+    lb_group:  peer.lb_group  || '',
+    enabled:   peer.enabled   ?? true,
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -390,7 +406,7 @@ function EditPeerModal({ peer, onClose, onSaved }) {
     }
     setSubmitting(true)
     try {
-      await updatePeer(peer.name, { ...form, port: Number(form.port), weight: Number(form.weight) })
+      await updatePeer(peer.name, { ...form, port: Number(form.port) })
       toast.success('Peer updated', peer.name)
       onSaved()
     } catch (err) {
@@ -409,15 +425,13 @@ function EditPeerModal({ peer, onClose, onSaved }) {
             <input className="input mono" value={peer.name} disabled style={{ opacity: 0.5 }} />
             <span className="form-hint">Name cannot be changed</span>
           </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Peer Group</label>
-              <input className="input" placeholder="hss_group" value={form.peer_group} onChange={e => set('peer_group', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Weight</label>
-              <input className="input" type="number" min={1} max={100} value={form.weight} onChange={e => set('weight', e.target.value)} />
-            </div>
+          <div className="form-group">
+            <label className="form-label">LB Group</label>
+            <LBGroupSelect
+              value={form.lb_group}
+              onChange={v => set('lb_group', v)}
+              lbGroups={lbGroups}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">FQDN *</label>
@@ -473,7 +487,7 @@ function EditPeerModal({ peer, onClose, onSaved }) {
   )
 }
 
-function AddPeerModal({ onClose, onCreated }) {
+function AddPeerModal({ lbGroups, onClose, onCreated }) {
   const toast = useToast()
   const [form, setForm] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
@@ -490,7 +504,7 @@ function AddPeerModal({ onClose, onCreated }) {
     }
     setSubmitting(true)
     try {
-      await createPeer({ ...form, port: Number(form.port), weight: Number(form.weight) })
+      await createPeer({ ...form, port: Number(form.port) })
       toast.success('Peer added', form.name)
       onCreated()
     } catch (err) {
@@ -510,8 +524,12 @@ function AddPeerModal({ onClose, onCreated }) {
               <input className="input" placeholder="hss01" value={form.name} onChange={e => set('name', e.target.value)} required />
             </div>
             <div className="form-group">
-              <label className="form-label">Peer Group</label>
-              <input className="input" placeholder="hss_group" value={form.peer_group} onChange={e => set('peer_group', e.target.value)} />
+              <label className="form-label">LB Group</label>
+              <LBGroupSelect
+                value={form.lb_group}
+                onChange={v => set('lb_group', v)}
+                lbGroups={lbGroups}
+              />
             </div>
           </div>
           <div className="form-group">
@@ -533,7 +551,7 @@ function AddPeerModal({ onClose, onCreated }) {
             <label className="form-label">Realm</label>
             <input className="input mono" placeholder="epc.mnc435.mcc311.3gppnetwork.org" value={form.realm} onChange={e => set('realm', e.target.value)} />
           </div>
-          <div className="form-row-3">
+          <div className="form-row">
             <div className="form-group">
               <label className="form-label">Transport</label>
               <select className="select" value={form.transport} onChange={e => set('transport', e.target.value)}>
@@ -549,10 +567,6 @@ function AddPeerModal({ onClose, onCreated }) {
                 <option value="active">active (we dial)</option>
                 <option value="passive">passive (they dial)</option>
               </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Weight</label>
-              <input className="input" type="number" min={1} max={100} value={form.weight} onChange={e => set('weight', e.target.value)} />
             </div>
           </div>
           <label className="checkbox-wrap">

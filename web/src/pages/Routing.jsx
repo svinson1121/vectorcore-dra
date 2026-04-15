@@ -8,16 +8,19 @@ import { usePoller } from '../hooks/usePoller.js'
 import {
   getRoutes, createRoute, updateRoute, deleteRoute,
   getIMSIRoutes, createIMSIRoute, updateIMSIRoute, deleteIMSIRoute,
-  getPeerGroups, createPeerGroup, updatePeerGroup, deletePeerGroup,
+  getLBGroups, createLBGroup, updateLBGroup, deleteLBGroup,
 } from '../api/client.js'
 
 const APP_ID_NAMES = {
   0: 'any',
   1: 'NASREQ',
+  2: 'MobileIPv4',
   3: 'BaseAcct',
+  4: 'CreditControl',
   16777216: 'Cx/Dx',
   16777217: 'Sh',
   16777219: 'Wx',
+  16777221: 'Zh',
   16777236: 'Rx',
   16777238: 'Gx',
   16777239: 'Gy',
@@ -28,6 +31,8 @@ const APP_ID_NAMES = {
   16777267: 'S9',
   16777272: 'S6b',
   16777291: 'SLh',
+  16777312: 'S6c',
+  16777313: 'SGd',
   4294967295: 'Relay',
 }
 
@@ -45,7 +50,7 @@ export default function Routing() {
       <div className="page-header">
         <div>
           <div className="page-title">Routing</div>
-          <div className="page-subtitle">Route rules, IMSI prefix routing, and peer groups</div>
+          <div className="page-subtitle">Route rules, IMSI prefix routing, and LB groups</div>
         </div>
       </div>
 
@@ -53,7 +58,7 @@ export default function Routing() {
         {[
           { id: 'routes', label: 'Route Rules' },
           { id: 'imsi', label: 'IMSI Routes' },
-          { id: 'groups', label: 'Peer Groups' },
+          { id: 'groups', label: 'LB Groups' },
         ].map(t => (
           <button
             key={t.id}
@@ -80,7 +85,7 @@ const ROUTE_DEFAULTS = {
   dest_host: '',
   dest_realm: '',
   app_id: 0,
-  peer_group: '',
+  lb_group: '',
   action: 'route',
   enabled: true,
 }
@@ -88,38 +93,40 @@ const ROUTE_DEFAULTS = {
 function RouteRulesTab() {
   const toast = useToast()
   const { data: routes, error, loading, refresh } = usePoller(getRoutes)
+  const { data: lbGroups } = usePoller(getLBGroups, 15000)
   const [showModal, setShowModal] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [actionLoading, setActionLoading] = useState({})
 
   const handleToggle = useCallback(async (rule) => {
-    const id = rule.id || rule.priority
-    setActionLoading(prev => ({ ...prev, [id]: true }))
+    const idx = rule.index
+    setActionLoading(prev => ({ ...prev, [idx]: true }))
     try {
-      await updateRoute(id, { ...rule, enabled: !rule.enabled })
+      const { index: _i, ...ruleBody } = rule
+      await updateRoute(idx, { ...ruleBody, enabled: !rule.enabled })
       toast.success(rule.enabled ? 'Rule disabled' : 'Rule enabled')
       refresh()
     } catch (err) {
       toast.error('Action failed', err.message)
     } finally {
-      setActionLoading(prev => ({ ...prev, [id]: false }))
+      setActionLoading(prev => ({ ...prev, [idx]: false }))
     }
   }, [toast, refresh])
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return
-    const id = deleteTarget.id || deleteTarget.priority
-    setActionLoading(prev => ({ ...prev, [id]: true }))
+    const idx = deleteTarget.index
+    setActionLoading(prev => ({ ...prev, [idx]: true }))
     try {
-      await deleteRoute(id)
+      await deleteRoute(idx)
       toast.success('Route rule deleted')
       setDeleteTarget(null)
       refresh()
     } catch (err) {
       toast.error('Delete failed', err.message)
     } finally {
-      setActionLoading(prev => { const n = { ...prev }; delete n[id]; return n })
+      setActionLoading(prev => { const n = { ...prev }; delete n[idx]; return n })
     }
   }, [deleteTarget, toast, refresh])
 
@@ -169,16 +176,16 @@ function RouteRulesTab() {
                 <th>Dest Host</th>
                 <th>App ID</th>
                 <th>Action</th>
-                <th>Peer / Group</th>
+                <th>Dest Host / LB Group</th>
                 <th>Enabled</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((rule, i) => {
-                const id = rule.id || rule.priority || i
+              {sorted.map((rule) => {
+                const idx = rule.index
                 return (
-                  <tr key={id}>
+                  <tr key={idx}>
                     <td className="mono" style={{ fontWeight: 700 }}>{rule.priority ?? '—'}</td>
                     <td className="mono" style={{ fontSize: '0.8rem', color: rule.dest_realm ? 'var(--text)' : 'var(--text-muted)' }}>
                       {rule.dest_realm || '*'}
@@ -189,14 +196,14 @@ function RouteRulesTab() {
                     <td className="mono" style={{ fontSize: '0.75rem' }}>{appLabel(rule.app_id ?? 0)}</td>
                     <td><Badge state={rule.action} /></td>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
-                      {rule.peer_group || rule.peer || <span className="text-muted">—</span>}
+                      {rule.dest_host || rule.lb_group || <span className="text-muted">—</span>}
                     </td>
                     <td>
                       <label className="toggle">
                         <input
                           type="checkbox"
                           checked={rule.enabled ?? true}
-                          disabled={actionLoading[id]}
+                          disabled={actionLoading[idx]}
                           onChange={() => handleToggle(rule)}
                         />
                         <span className="toggle-slider" />
@@ -209,7 +216,7 @@ function RouteRulesTab() {
                           <Edit3 size={13} />
                         </button>
                         <button className="btn-icon danger" title="Delete"
-                          disabled={actionLoading[id]}
+                          disabled={actionLoading[idx]}
                           onClick={() => setDeleteTarget(rule)}>
                           <Trash2 size={13} />
                         </button>
@@ -226,6 +233,7 @@ function RouteRulesTab() {
       {showModal && (
         <RouteModal
           initial={editTarget}
+          lbGroups={Array.isArray(lbGroups) ? lbGroups : []}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); refresh() }}
         />
@@ -236,14 +244,14 @@ function RouteRulesTab() {
           label={`route rule (priority ${deleteTarget.priority})`}
           onClose={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
-          loading={!!actionLoading[deleteTarget?.id || deleteTarget?.priority]}
+          loading={!!actionLoading[deleteTarget?.index]}
         />
       )}
     </div>
   )
 }
 
-function RouteModal({ initial, onClose, onSaved }) {
+function RouteModal({ initial, lbGroups, onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState(initial ? { ...ROUTE_DEFAULTS, ...initial } : { ...ROUTE_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
@@ -254,9 +262,10 @@ function RouteModal({ initial, onClose, onSaved }) {
     e.preventDefault()
     setSubmitting(true)
     try {
-      const payload = { ...form, priority: Number(form.priority), app_id: Number(form.app_id) }
-      if (initial && (initial.id || initial.priority != null)) {
-        await updateRoute(initial.id || initial.priority, payload)
+      const { index: _i, ...formBody } = form
+      const payload = { ...formBody, priority: Number(form.priority), app_id: Number(form.app_id) }
+      if (initial?.index != null) {
+        await updateRoute(initial.index, payload)
         toast.success('Route rule updated')
       } else {
         await createRoute(payload)
@@ -312,23 +321,34 @@ function RouteModal({ initial, onClose, onSaved }) {
               <label className="form-label">App ID</label>
               <select className="select" value={form.app_id} onChange={e => set('app_id', e.target.value)}>
                 <option value={0}>0 — any (wildcard)</option>
-                <option value={16777238}>16777238 — Gx</option>
-                <option value={16777251}>16777251 — S6a</option>
-                <option value={16777236}>16777236 — Rx</option>
-                <option value={16777252}>16777252 — S13</option>
+                <option value={1}>1 — NASREQ</option>
+                <option value={3}>3 — Base Accounting</option>
+                <option value={4}>4 — Credit-Control / Gy/Ro (RFC 4006)</option>
                 <option value={16777216}>16777216 — Cx/Dx</option>
                 <option value={16777217}>16777217 — Sh</option>
+                <option value={16777219}>16777219 — Wx</option>
+                <option value={16777221}>16777221 — Zh</option>
+                <option value={16777236}>16777236 — Rx</option>
+                <option value={16777238}>16777238 — Gx</option>
+                <option value={16777239}>16777239 — Gy (3GPP vendor-specific)</option>
+                <option value={16777251}>16777251 — S6a</option>
+                <option value={16777252}>16777252 — S13</option>
+                <option value={16777264}>16777264 — SWm</option>
                 <option value={16777265}>16777265 — SWx</option>
+                <option value={16777267}>16777267 — S9</option>
                 <option value={16777272}>16777272 — S6b</option>
                 <option value={16777291}>16777291 — SLh</option>
+                <option value={16777312}>16777312 — S6c</option>
+                <option value={16777313}>16777313 — SGd</option>
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Peer Group</label>
-              <input className="input"
-                placeholder="pcrf_group"
-                value={form.peer_group}
-                onChange={e => set('peer_group', e.target.value)} />
+              <label className="form-label">LB Group</label>
+              <LBGroupSelect
+                value={form.lb_group}
+                onChange={v => set('lb_group', v)}
+                lbGroups={lbGroups}
+              />
             </div>
           </div>
 
@@ -357,13 +377,14 @@ function RouteModal({ initial, onClose, onSaved }) {
 const IMSI_DEFAULTS = {
   prefix: '',
   dest_realm: '',
-  peer_group: '',
+  lb_group: '',
   priority: 10,
 }
 
 function IMSIRoutesTab() {
   const toast = useToast()
   const { data: routes, error, loading, refresh } = usePoller(getIMSIRoutes)
+  const { data: lbGroups } = usePoller(getLBGroups, 15000)
   const [showModal, setShowModal] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -371,17 +392,17 @@ function IMSIRoutesTab() {
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return
-    const id = deleteTarget.id || deleteTarget.prefix
-    setActionLoading(prev => ({ ...prev, [id]: true }))
+    const idx = deleteTarget.index
+    setActionLoading(prev => ({ ...prev, [idx]: true }))
     try {
-      await deleteIMSIRoute(id)
+      await deleteIMSIRoute(idx)
       toast.success('IMSI route deleted')
       setDeleteTarget(null)
       refresh()
     } catch (err) {
       toast.error('Delete failed', err.message)
     } finally {
-      setActionLoading(prev => { const n = { ...prev }; delete n[id]; return n })
+      setActionLoading(prev => { const n = { ...prev }; delete n[idx]; return n })
     }
   }, [deleteTarget, toast, refresh])
 
@@ -433,19 +454,19 @@ function IMSIRoutesTab() {
                 <th>Prefix</th>
                 <th>MCC / MNC</th>
                 <th>Dest Realm</th>
-                <th>Peer Group</th>
+                <th>LB Group</th>
                 <th>Priority</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((route, i) => {
-                const id = route.id || route.prefix || i
+              {sorted.map((route) => {
+                const idx = route.index
                 const p = route.prefix || ''
                 const mcc = p.slice(0, 3)
                 const mnc = p.slice(3)
                 return (
-                  <tr key={id}>
+                  <tr key={idx}>
                     <td className="mono" style={{ fontWeight: 700, letterSpacing: '0.08em', fontSize: '0.9rem' }}>
                       {route.prefix || '—'}
                     </td>
@@ -453,7 +474,7 @@ function IMSIRoutesTab() {
                       {mcc && mnc ? `MCC ${mcc} / MNC ${mnc}` : '—'}
                     </td>
                     <td className="mono" style={{ fontSize: '0.8rem' }}>{route.dest_realm || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{route.peer_group || <span className="text-muted">—</span>}</td>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{route.lb_group || <span className="text-muted">—</span>}</td>
                     <td className="mono">{route.priority ?? '—'}</td>
                     <td>
                       <div className="flex gap-6">
@@ -462,7 +483,7 @@ function IMSIRoutesTab() {
                           <Edit3 size={13} />
                         </button>
                         <button className="btn-icon danger" title="Delete"
-                          disabled={!!actionLoading[id]}
+                          disabled={!!actionLoading[idx]}
                           onClick={() => setDeleteTarget(route)}>
                           <Trash2 size={13} />
                         </button>
@@ -479,6 +500,7 @@ function IMSIRoutesTab() {
       {showModal && (
         <IMSIModal
           initial={editTarget}
+          lbGroups={Array.isArray(lbGroups) ? lbGroups : []}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); refresh() }}
         />
@@ -489,14 +511,14 @@ function IMSIRoutesTab() {
           label={`IMSI route prefix ${deleteTarget.prefix}`}
           onClose={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
-          loading={!!actionLoading[deleteTarget?.id || deleteTarget?.prefix]}
+          loading={!!actionLoading[deleteTarget?.index]}
         />
       )}
     </div>
   )
 }
 
-function IMSIModal({ initial, onClose, onSaved }) {
+function IMSIModal({ initial, lbGroups, onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState(initial ? { ...IMSI_DEFAULTS, ...initial } : { ...IMSI_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
@@ -516,8 +538,10 @@ function IMSIModal({ initial, onClose, onSaved }) {
     setSubmitting(true)
     try {
       const payload = { ...form, priority: Number(form.priority) }
-      if (initial && (initial.id || initial.prefix)) {
-        await updateIMSIRoute(initial.id || initial.prefix, payload)
+      delete payload.index
+      if (!payload.lb_group) delete payload.lb_group
+      if (initial?.index != null) {
+        await updateIMSIRoute(initial.index, payload)
         toast.success('IMSI route updated')
       } else {
         await createIMSIRoute(payload)
@@ -557,10 +581,12 @@ function IMSIModal({ initial, onClose, onSaved }) {
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Peer Group</label>
-              <input className="input" placeholder="home_hss"
-                value={form.peer_group}
-                onChange={e => set('peer_group', e.target.value)} />
+              <label className="form-label">LB Group</label>
+              <LBGroupSelect
+                value={form.lb_group}
+                onChange={v => set('lb_group', v)}
+                lbGroups={lbGroups}
+              />
             </div>
             <div className="form-group">
               <label className="form-label">Priority</label>
@@ -583,7 +609,7 @@ function IMSIModal({ initial, onClose, onSaved }) {
 }
 
 /* ============================================================
-   Peer Groups
+   LB Groups
    ============================================================ */
 const GROUP_DEFAULTS = {
   name: '',
@@ -592,7 +618,7 @@ const GROUP_DEFAULTS = {
 
 function PeerGroupsTab() {
   const toast = useToast()
-  const { data: groups, error, loading, refresh } = usePoller(getPeerGroups)
+  const { data: groups, error, loading, refresh } = usePoller(getLBGroups)
   const [showModal, setShowModal] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -603,8 +629,8 @@ function PeerGroupsTab() {
     const name = deleteTarget.name
     setActionLoading(prev => ({ ...prev, [name]: true }))
     try {
-      await deletePeerGroup(name)
-      toast.success('Peer group deleted', name)
+      await deleteLBGroup(name)
+      toast.success('LB group deleted', name)
       setDeleteTarget(null)
       refresh()
     } catch (err) {
@@ -642,8 +668,8 @@ function PeerGroupsTab() {
       {list.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon" style={{ fontSize: 28 }}>◎</div>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>No peer groups configured</div>
-          <div className="text-muted text-sm">Peer groups aggregate peers for load balancing and failover.</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>No LB groups configured</div>
+          <div className="text-muted text-sm">LB groups aggregate peers for load balancing and failover.</div>
           <button className="btn btn-primary btn-sm mt-12" onClick={() => { setEditTarget(null); setShowModal(true) }}>
             <Plus size={12} /> Add Group
           </button>
@@ -688,7 +714,7 @@ function PeerGroupsTab() {
       )}
 
       {showModal && (
-        <PeerGroupModal
+        <LBGroupModal
           initial={editTarget}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); refresh() }}
@@ -697,7 +723,7 @@ function PeerGroupsTab() {
 
       {deleteTarget && (
         <ConfirmDeleteModal
-          label={`peer group "${deleteTarget.name}"`}
+          label={`LB group "${deleteTarget.name}"`}
           onClose={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
           loading={!!actionLoading[deleteTarget?.name]}
@@ -707,7 +733,7 @@ function PeerGroupsTab() {
   )
 }
 
-function PeerGroupModal({ initial, onClose, onSaved }) {
+function LBGroupModal({ initial, onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState(initial ? { ...GROUP_DEFAULTS, ...initial } : { ...GROUP_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
@@ -723,11 +749,11 @@ function PeerGroupModal({ initial, onClose, onSaved }) {
     setSubmitting(true)
     try {
       if (initial && initial.name) {
-        await updatePeerGroup(initial.name, { lb_policy: form.lb_policy })
-        toast.success('Peer group updated', form.name)
+        await updateLBGroup(initial.name, { lb_policy: form.lb_policy })
+        toast.success('LB group updated', form.name)
       } else {
-        await createPeerGroup(form)
-        toast.success('Peer group created', form.name)
+        await createLBGroup(form)
+        toast.success('LB group created', form.name)
       }
       onSaved()
     } catch (err) {
@@ -738,7 +764,7 @@ function PeerGroupModal({ initial, onClose, onSaved }) {
   }, [form, initial, toast, onSaved])
 
   return (
-    <Modal title={initial ? 'Edit Peer Group' : 'Add Peer Group'} onClose={onClose}>
+    <Modal title={initial ? 'Edit LB Group' : 'Add LB Group'} onClose={onClose}>
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-group">
@@ -754,7 +780,6 @@ function PeerGroupModal({ initial, onClose, onSaved }) {
             <label className="form-label">Load Balancing Policy</label>
             <select className="select" value={form.lb_policy} onChange={e => set('lb_policy', e.target.value)}>
               <option value="round_robin">round_robin — sequential rotation</option>
-              <option value="weighted">weighted — by peer weight field</option>
               <option value="least_conn">least_conn — fewest in-flight</option>
             </select>
           </div>
@@ -774,6 +799,22 @@ function PeerGroupModal({ initial, onClose, onSaved }) {
 /* ============================================================
    Shared helpers
    ============================================================ */
+function LBGroupSelect({ value, onChange, lbGroups }) {
+  const groups = Array.isArray(lbGroups) ? lbGroups : []
+  const valueInList = groups.some(g => g.name === value)
+  return (
+    <select className="select" value={value} onChange={e => onChange(e.target.value)}>
+      <option value="">-- none --</option>
+      {groups.map(g => (
+        <option key={g.name} value={g.name}>{g.name}</option>
+      ))}
+      {value && !valueInList && (
+        <option value={value}>{value} (not in list)</option>
+      )}
+    </select>
+  )
+}
+
 function ConfirmDeleteModal({ label, onClose, onConfirm, loading }) {
   return (
     <Modal title="Confirm Delete" onClose={onClose}>

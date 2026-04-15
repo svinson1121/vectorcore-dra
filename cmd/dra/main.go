@@ -266,6 +266,12 @@ func acceptLoop(ctx context.Context, ln net.Listener, transportName string, cfg 
 	}
 }
 
+// derefEnabled returns true if b is nil (not set in config, defaults to enabled)
+// or if *b is true. Only returns false when explicitly set to false.
+func derefEnabled(b *bool) bool {
+	return b == nil || *b
+}
+
 // configRulesToRouterRules converts config.RouteRule slice to router.Rule slice.
 func configRulesToRouterRules(cfgRules []config.RouteRule) []router.Rule {
 	rules := make([]router.Rule, 0, len(cfgRules))
@@ -275,10 +281,9 @@ func configRulesToRouterRules(cfgRules []config.RouteRule) []router.Rule {
 			DestHost:  r.DestHost,
 			DestRealm: r.DestRealm,
 			AppID:     r.AppID,
-			PeerGroup: r.PeerGroup,
-			Peer:      r.Peer,
+			LBGroup:   r.LBGroup,
 			Action:    r.Action,
-			Enabled:   r.Enabled,
+			Enabled:   derefEnabled(r.Enabled),
 		})
 	}
 	return rules
@@ -291,9 +296,9 @@ func configIMSIToRouterIMSI(cfgRoutes []config.IMSIRoute) []router.IMSIRoute {
 		routes = append(routes, router.IMSIRoute{
 			Prefix:    r.Prefix,
 			DestRealm: r.DestRealm,
-			PeerGroup: r.PeerGroup,
+			LBGroup:   r.LBGroup,
 			Priority:  r.Priority,
-			Enabled:   r.Enabled,
+			Enabled:   derefEnabled(r.Enabled),
 		})
 	}
 	return routes

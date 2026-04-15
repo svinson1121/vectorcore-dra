@@ -55,27 +55,29 @@ const (
 	DiameterUnableToComply         = 5012
 )
 
-// Application IDs per RFC 6733 and 3GPP specs
+// Application IDs per RFC 6733, RFC 4006, and 3GPP specs
 const (
 	AppDiameterCommon uint32 = 0 // used in CER
 	AppNASREQ         uint32 = 1
 	AppMobileIPv4     uint32 = 2
 	AppBaseAccounting uint32 = 3
+	AppCreditControl  uint32 = 4          // RFC 4006 -- standard Gy/Ro online charging
 	AppRelayAgent     uint32 = 0xFFFFFFFF // relay = no app-specific processing
 
 	App3GPP_Cx  uint32 = 16777216 // Cx/Dx IMS
-	App3GPP_Sh  uint32 = 16777217
+	App3GPP_Sh  uint32 = 16777217 // Sh user data
 	App3GPP_Wx  uint32 = 16777219 // Wx AAA-HSS (3GPP TS 29.273)
 	App3GPP_Zh  uint32 = 16777221 // Zh Bootstrapping (3GPP TS 29.109)
-	App3GPP_Gx  uint32 = 16777238 // Gx PCEF-PCRF
 	App3GPP_Rx  uint32 = 16777236 // Rx P-CSCF/PCRF
+	App3GPP_Gx  uint32 = 16777238 // Gx PCEF-PCRF
+	App3GPP_Gy  uint32 = 16777239 // Gy online charging (3GPP vendor-specific)
 	App3GPP_S6a uint32 = 16777251 // S6a MME-HSS
 	App3GPP_S13 uint32 = 16777252 // S13 EIR
 	App3GPP_SWm uint32 = 16777264 // SWm ePDG-AAA (3GPP TS 29.273)
-	App3GPP_SLh uint32 = 16777291
 	App3GPP_SWx uint32 = 16777265 // SWx HSS-AAA (EPC WiFi)
 	App3GPP_S9  uint32 = 16777267 // S9 V-PCRF/H-PCRF (3GPP TS 29.215)
 	App3GPP_S6b uint32 = 16777272 // S6b PGW-AAA
+	App3GPP_SLh uint32 = 16777291 // SLh LCS routing
 	App3GPP_S6c uint32 = 16777312 // S6c HSS-SMSC (3GPP TS 29.338)
 	App3GPP_SGd uint32 = 16777313 // SGd SMS over Diameter (3GPP TS 29.338)
 )
@@ -129,6 +131,16 @@ var appCommandNames = map[uint32]map[uint32]string{
 	App3GPP_Gx: {
 		CmdReAuth:        "RAR/RAA",
 		CmdCreditControl: "CCR/CCA",
+		CmdAbortSession:  "ASR/ASA",
+	},
+	App3GPP_Gy: {
+		CmdCreditControl: "CCR/CCA",
+		CmdReAuth:        "RAR/RAA",
+		CmdAbortSession:  "ASR/ASA",
+	},
+	AppCreditControl: {
+		CmdCreditControl: "CCR/CCA",
+		CmdReAuth:        "RAR/RAA",
 		CmdAbortSession:  "ASR/ASA",
 	},
 	App3GPP_S6a: {
