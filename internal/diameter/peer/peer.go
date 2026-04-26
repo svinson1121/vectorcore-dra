@@ -54,8 +54,8 @@ type Config struct {
 	Port          int
 	Transport     transport.Transport
 	TransportName string // "tcp" | "tcp+tls" | "sctp" | "sctp+tls"
-	Mode    string // "active" | "passive"
-	LBGroup string // lb group name this peer belongs to
+	Mode          string // "active" | "passive"
+	LBGroup       string // lb group name this peer belongs to
 	Weight        int    // for weighted load balancing
 
 	// Local DRA identity
@@ -73,6 +73,8 @@ type Config struct {
 
 	// Inbound indicates this peer was accepted (not dialed); true for passive mode
 	Inbound bool
+
+	QoS transport.QoSPolicy
 }
 
 // Peer represents a remote Diameter peer with a full FSM lifecycle.
@@ -85,7 +87,7 @@ type Peer struct {
 	ActualTransport string    // transport actually in use; set at connect time
 	connectedAt     time.Time // when state last became OPEN
 
-	writeCh chan *message.Message
+	writeCh chan outboundMessage
 	stopCh  chan struct{}
 	stopped bool
 
@@ -112,13 +114,18 @@ type Peer struct {
 	log *zap.Logger
 }
 
+type outboundMessage struct {
+	msg *message.Message
+	tos *int
+}
+
 // New creates a new Peer.
 func New(cfg Config, log *zap.Logger) *Peer {
 	return &Peer{
 		cfg:             cfg,
 		state:           StateClosed,
 		ActualTransport: cfg.TransportName, // correct for outbound; overridden via SetConnWithTransport for inbound
-		writeCh:         make(chan *message.Message, 64),
+		writeCh:         make(chan outboundMessage, 64),
 		stopCh:          make(chan struct{}),
 		ceaCh:           make(chan error, 1),
 		dprDoneCh:       make(chan struct{}, 1),
@@ -151,6 +158,15 @@ func (p *Peer) Stop() {
 
 // Send queues a message for delivery to the peer.
 func (p *Peer) Send(msg *message.Message) error {
+	return p.send(outboundMessage{msg: msg})
+}
+
+// SendWithTOS queues a message and applies tos before writing when QoS preserve is enabled.
+func (p *Peer) SendWithTOS(msg *message.Message, tos int) error {
+	return p.send(outboundMessage{msg: msg, tos: &tos})
+}
+
+func (p *Peer) send(out outboundMessage) error {
 	p.mu.RLock()
 	state := p.state
 	p.mu.RUnlock()
@@ -160,11 +176,26 @@ func (p *Peer) Send(msg *message.Message) error {
 	}
 
 	select {
-	case p.writeCh <- msg:
+	case p.writeCh <- out:
 		return nil
 	default:
 		return fmt.Errorf("peer %s: write channel full", p.cfg.FQDN)
 	}
+}
+
+// CurrentTOS returns the current TOS/traffic-class byte for the peer connection.
+func (p *Peer) CurrentTOS() (int, bool) {
+	p.mu.RLock()
+	conn := p.conn
+	p.mu.RUnlock()
+	if conn == nil {
+		return 0, false
+	}
+	if tracked, ok := conn.(transport.LastReceivedTOSConn); ok {
+		return tracked.LastReceivedTOS()
+	}
+	tos, err := transport.GetTOS(conn)
+	return tos, err == nil
 }
 
 // State returns the current FSM state.

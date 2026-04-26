@@ -11,6 +11,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/zap"
 
+	"github.com/svinson1121/vectorcore-dra/internal/buildinfo"
+	"github.com/svinson1121/vectorcore-dra/internal/config"
 	"github.com/svinson1121/vectorcore-dra/internal/diameter/peer"
 	"github.com/svinson1121/vectorcore-dra/internal/logging"
 )
@@ -82,35 +84,34 @@ func registerRuntime(api huma.API, s *Server) {
 			PeersTotal:    total,
 			PeersOpen:     open,
 			PeersClosed:   closed,
-			Version:       "0.2.0B",
+			Version:       buildinfo.Version,
 			LogLevel:      logging.GetLevel(),
 		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		Method:      http.MethodPost,
-		Path:        "/api/v1/oam/reload",
-		Summary:     "Force config reload",
-		Description: "Re-reads config.yaml from disk and applies changes.",
-		Tags:        []string{"OAM"},
+		Method:        http.MethodPost,
+		Path:          "/api/v1/oam/reload",
+		Summary:       "Force config reload",
+		Description:   "Re-reads config.yaml from disk and applies changes.",
+		Tags:          []string{"OAM"},
 		DefaultStatus: http.StatusNoContent,
 	}, func(ctx context.Context, input *struct{}) (*struct{}, error) {
-		// The config watcher handles hot-reload; this endpoint triggers a manual reload.
-		// We re-use the same sync path as the watcher.
 		s.log.Info("manual config reload requested via API")
-		// The actual reload is handled by the watcher callback in main.go.
-		// Here we trigger it by posting a no-op sync with current config.
-		localIP := getLocalIPForAPI()
-		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, localIP)
+		newCfg, err := config.Load(s.cfgPath)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("loading config: " + err.Error())
+		}
+		s.ApplyConfig(newCfg)
 		return nil, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		Method:      http.MethodPost,
-		Path:        "/api/v1/oam/log-level",
-		Summary:     "Change log level at runtime",
-		Description: "Changes the log level without restart. Does not persist across restarts.",
-		Tags:        []string{"OAM"},
+		Method:        http.MethodPost,
+		Path:          "/api/v1/oam/log-level",
+		Summary:       "Change log level at runtime",
+		Description:   "Changes the log level without restart. Does not persist across restarts.",
+		Tags:          []string{"OAM"},
 		DefaultStatus: http.StatusNoContent,
 	}, func(ctx context.Context, input *struct {
 		Body LogLevelRequest
@@ -231,4 +232,3 @@ func getLocalIPForAPI() net.IP {
 	}
 	return net.ParseIP("127.0.0.1")
 }
-

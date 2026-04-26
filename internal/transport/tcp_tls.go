@@ -19,11 +19,16 @@ type TLSConfig struct {
 // TCPTLS is a TCP transport with TLS.
 type TCPTLS struct {
 	cfg TLSConfig
+	qos QoSPolicy
 }
 
 // NewTCPTLS creates a new TCP+TLS transport.
-func NewTCPTLS(cfg TLSConfig) *TCPTLS {
-	return &TCPTLS{cfg: cfg}
+func NewTCPTLS(cfg TLSConfig, qos ...QoSPolicy) *TCPTLS {
+	policy := DefaultQoS()
+	if len(qos) > 0 {
+		policy = qos[0]
+	}
+	return &TCPTLS{cfg: cfg, qos: policy}
 }
 
 // Dial establishes a TLS-over-TCP connection to addr.
@@ -32,8 +37,21 @@ func (t *TCPTLS) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &tls.Dialer{Config: tlsCfg}
-	return d.DialContext(ctx, "tcp", addr)
+	d := &net.Dialer{Control: t.qos.Control}
+	rawConn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.qos.Apply(rawConn); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	tlsConn := tls.Client(rawConn, tlsCfg)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
 }
 
 // Listen creates a TLS listener on addr.
@@ -42,11 +60,12 @@ func (t *TCPTLS) Listen(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	ln, err := tls.Listen("tcp", addr, tlsCfg)
+	lc := net.ListenConfig{Control: t.qos.Control}
+	rawLn, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("tcp+tls: listen on %s: %w", addr, err)
 	}
-	return ln, nil
+	return tls.NewListener(rawLn, tlsCfg), nil
 }
 
 // Protocol returns "tcp+tls".

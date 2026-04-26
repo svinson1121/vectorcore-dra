@@ -1,11 +1,13 @@
 .PHONY: ui build test clean dev-ui all install uninstall
 
 BINARY=dra
+VERSION ?= 0.4.0B
 PREFIX=/opt/vectorcore
 BINDIR=$(PREFIX)/bin
 ETCDIR=$(PREFIX)/etc
 LOGDIR=$(PREFIX)/log
 SYSTEMD=/lib/systemd/system/
+LDFLAGS=-X github.com/svinson1121/vectorcore-dra/internal/buildinfo.Version=$(VERSION)
 
 
 all: ui build
@@ -16,7 +18,7 @@ ui:
 
 # Build the Go binary (includes embedded UI if web/dist exists)
 build:
-	go build -o bin/dra ./cmd/dra
+	go build -ldflags "$(LDFLAGS)" -o bin/dra ./cmd/dra
 
 # Run tests
 test:
@@ -58,4 +60,3 @@ uninstall:
 	rm -f $(SYSTEMD)/vectorcore-dra.service
 
 	systemctl daemon-reload
-

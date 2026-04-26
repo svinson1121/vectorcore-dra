@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -11,12 +12,12 @@ import (
 type Config struct {
 	DRA        DRAConfig        `yaml:"dra"`
 	Listeners  []ListenerConfig `yaml:"listeners"`
-	TLS        TLSConfig        `yaml:"tls"`        // shared TLS cert for all TLS listeners
-	API        APIConfig        `yaml:"api"`         // HTTP management API (was "http")
+	TLS        TLSConfig        `yaml:"tls"` // shared TLS cert for all TLS listeners
+	API        APIConfig        `yaml:"api"` // HTTP management API (was "http")
 	Logging    LoggingConfig    `yaml:"logging"`
 	Watchdog   WatchdogConfig   `yaml:"watchdog"`
 	Reconnect  ReconnectConfig  `yaml:"reconnect"`
-	LBGroups   []LBGroup        `yaml:"lb_groups"`   // optional: define LB policy per group
+	LBGroups   []LBGroup        `yaml:"lb_groups"` // optional: define LB policy per group
 	Peers      []Peer           `yaml:"peers"`
 	IMSIRoutes []IMSIRoute      `yaml:"imsi_routes"`
 	RouteRules []RouteRule      `yaml:"route_rules"`
@@ -24,9 +25,16 @@ type Config struct {
 
 // DRAConfig holds the DRA's own identity configuration.
 type DRAConfig struct {
-	Identity string `yaml:"identity"`
-	Realm    string `yaml:"realm"`
-	VendorID uint32 `yaml:"vendor_id"`
+	Identity string    `yaml:"identity"`
+	Realm    string    `yaml:"realm"`
+	VendorID uint32    `yaml:"vendor_id"`
+	QoS      QoSConfig `yaml:"qos"`
+}
+
+// QoSConfig controls IP DSCP/TOS handling for Diameter transports.
+type QoSConfig struct {
+	Mode string `yaml:"mode"` // preserve | set | clear
+	DSCP int    `yaml:"dscp"` // 0..63, used when mode is "set"
 }
 
 // ListenerConfig describes one listening socket.
@@ -39,9 +47,9 @@ type ListenerConfig struct {
 
 // TLSConfig holds the shared TLS certificate used by all TLS listeners (tcp+tls, sctp+tls).
 type TLSConfig struct {
-	CertFile string `yaml:"cert"`  // PEM certificate file
-	KeyFile  string `yaml:"key"`   // PEM private key file
-	CAFile   string `yaml:"ca"`    // PEM CA bundle for peer verification; "" = system roots
+	CertFile string `yaml:"cert"` // PEM certificate file
+	KeyFile  string `yaml:"key"`  // PEM private key file
+	CAFile   string `yaml:"ca"`   // PEM CA bundle for peer verification; "" = system roots
 }
 
 // APIConfig holds the HTTP management API server configuration.
@@ -78,12 +86,12 @@ type LBGroup struct {
 type Peer struct {
 	Name      string `yaml:"name"`
 	FQDN      string `yaml:"fqdn"`
-	Address   string `yaml:"address"`  // IP or FQDN; resolved via DNS if not an IP
+	Address   string `yaml:"address"` // IP or FQDN; resolved via DNS if not an IP
 	Port      int    `yaml:"port"`
 	Transport string `yaml:"transport"` // tcp | tcp+tls | sctp | sctp+tls
 	Mode      string `yaml:"mode"`      // active (we connect) | passive (we wait)
 	Realm     string `yaml:"realm"`
-	LBGroup   string `yaml:"lb_group"`   // name of the LBGroup this peer belongs to
+	LBGroup   string `yaml:"lb_group"` // name of the LBGroup this peer belongs to
 	Weight    int    `yaml:"weight"`
 	Enabled   bool   `yaml:"enabled"`
 }
@@ -106,7 +114,7 @@ type RouteRule struct {
 	DestRealm string `yaml:"dest_realm"`          // "" = catch-all default route
 	AppID     uint32 `yaml:"app_id"`              // 0 = any
 	LBGroup   string `yaml:"lb_group,omitempty"`  // lb group to route to; omitted = auto-select
-	Action    string `yaml:"action"`                // route | reject | drop
+	Action    string `yaml:"action"`              // route | reject | drop
 	// Enabled defaults to true when omitted from config. Set to false to disable.
 	Enabled *bool `yaml:"enabled"`
 }
@@ -125,7 +133,26 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("config: parsing %q: %w", path, err)
 	}
+	if err := validateQoS(cfg.DRA.QoS); err != nil {
+		return nil, fmt.Errorf("config: invalid dra.qos: %w", err)
+	}
 	return cfg, nil
+}
+
+func validateQoS(q QoSConfig) error {
+	mode := strings.ToLower(q.Mode)
+	if mode == "" {
+		mode = "clear"
+	}
+	switch mode {
+	case "preserve", "set", "clear":
+	default:
+		return fmt.Errorf("unknown mode %q", q.Mode)
+	}
+	if q.DSCP < 0 || q.DSCP > 63 {
+		return fmt.Errorf("dscp must be between 0 and 63, got %d", q.DSCP)
+	}
+	return nil
 }
 
 // Save writes cfg to path atomically (write to path+".tmp", then rename).
@@ -160,6 +187,9 @@ func Default() *Config {
 		DRA: DRAConfig{
 			Identity: "dra.epc.example.com",
 			Realm:    "epc.example.com",
+			QoS: QoSConfig{
+				Mode: "clear",
+			},
 		},
 		Listeners: []ListenerConfig{
 			{Transport: "tcp", Address: "0.0.0.0", Port: 3868},

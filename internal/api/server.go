@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/svinson1121/vectorcore-dra/internal/buildinfo"
 	"github.com/svinson1121/vectorcore-dra/internal/config"
 	"github.com/svinson1121/vectorcore-dra/internal/peermgr"
 	"github.com/svinson1121/vectorcore-dra/internal/router"
@@ -53,7 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Use(zapMiddleware(s.log))
 
 	// Huma API - all endpoints and docs under /api/v1/
-	humaConfig := huma.DefaultConfig("VectorCore DRA API", "0.2.0B")
+	humaConfig := huma.DefaultConfig("VectorCore DRA API", buildinfo.Version)
 	humaConfig.OpenAPIPath = "/api/v1/openapi.json"
 	humaConfig.DocsPath = "/api/v1/docs"
 	humaConfig.SchemasPath = "/api/v1/schemas"
@@ -142,4 +143,27 @@ func zapMiddleware(log *zap.Logger) func(http.Handler) http.Handler {
 // saveConfig persists the current in-memory config atomically.
 func (s *Server) saveConfig() error {
 	return config.Save(s.cfgPath, s.cfg)
+}
+
+// ApplyConfig updates the in-memory config snapshot and applies mutable runtime state.
+func (s *Server) ApplyConfig(newCfg *config.Config) {
+	*s.cfg = *newCfg
+	s.router.UpdateGroupPolicies(lbGroupPolicies(s.cfg.LBGroups))
+	s.router.UpdateRules(configRulesToRouterRulesLocal(s.cfg.RouteRules))
+	s.router.UpdateIMSIRoutes(configIMSIToRouterIMSILocal(s.cfg.IMSIRoutes))
+
+	localIP := getLocalIPForAPI()
+	s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, s.cfg.TLS, localIP)
+}
+
+func (s *Server) syncRouterGroups() {
+	s.router.UpdateGroupPolicies(lbGroupPolicies(s.cfg.LBGroups))
+}
+
+func lbGroupPolicies(groups []config.LBGroup) map[string]string {
+	policies := make(map[string]string, len(groups))
+	for _, g := range groups {
+		policies[g.Name] = g.LBPolicy
+	}
+	return policies
 }

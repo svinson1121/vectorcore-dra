@@ -61,9 +61,9 @@ type PeerResponse struct {
 	Transport string `json:"transport"`
 	Mode      string `json:"mode"`
 	Realm     string `json:"realm"`
-	LBGroup  string `json:"lb_group"`
-	Weight   int    `json:"weight"`
-	Enabled  bool   `json:"enabled"`
+	LBGroup   string `json:"lb_group"`
+	Weight    int    `json:"weight"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // PeerStatusResponse is the live connection state for a peer.
@@ -89,12 +89,12 @@ type PeerCreateRequest struct {
 	FQDN      string `json:"fqdn"      required:"true"`
 	Address   string `json:"address"   required:"true"`
 	Port      int    `json:"port"      required:"true" minimum:"1" maximum:"65535"`
-	Transport string `json:"transport" required:"true" enum:"tcp,tcp+tls,sctp,sctp+tls"`
+	Transport string `json:"transport" required:"true" enum:"tcp,tcp+tls,sctp"`
 	Mode      string `json:"mode"      required:"false" enum:"active,passive" default:"active"`
 	Realm     string `json:"realm"     required:"true"`
-	LBGroup  string `json:"lb_group"  required:"false"`
-	Weight   int    `json:"weight"    required:"false" default:"1"`
-	Enabled  bool   `json:"enabled"   required:"false" default:"true"`
+	LBGroup   string `json:"lb_group"  required:"false"`
+	Weight    int    `json:"weight"    required:"false" default:"1"`
+	Enabled   bool   `json:"enabled"   required:"false" default:"true"`
 }
 
 // PeerPatchRequest is the body for PATCH /api/v1/peers/{name}.
@@ -104,7 +104,7 @@ type PeerPatchRequest struct {
 	FQDN      *string `json:"fqdn,omitempty"`
 	Address   *string `json:"address,omitempty"`
 	Port      *int    `json:"port,omitempty"    minimum:"1" maximum:"65535"`
-	Transport *string `json:"transport,omitempty" enum:"tcp,tcp+tls,sctp,sctp+tls"`
+	Transport *string `json:"transport,omitempty" enum:"tcp,tcp+tls,sctp"`
 	Mode      *string `json:"mode,omitempty"    enum:"active,passive"`
 	Realm     *string `json:"realm,omitempty"`
 	LBGroup   *string `json:"lb_group,omitempty"`
@@ -215,7 +215,7 @@ func registerPeers(api huma.API, s *Server) {
 
 		// Sync triggers connect for enabled peers.
 		localIP := getLocalIPForAPI()
-		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, localIP)
+		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, s.cfg.TLS, localIP)
 
 		return &struct{ Body PeerResponse }{Body: configPeerResponse(cfgPeer)}, nil
 	})
@@ -275,7 +275,7 @@ func registerPeers(api huma.API, s *Server) {
 			return nil, huma.Error500InternalServerError("failed to persist config: " + err.Error())
 		}
 		localIP := getLocalIPForAPI()
-		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, localIP)
+		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, s.cfg.TLS, localIP)
 
 		for _, pc := range s.cfg.Peers {
 			if pc.Name == name {
@@ -314,7 +314,7 @@ func registerPeers(api huma.API, s *Server) {
 			return nil, huma.Error500InternalServerError("failed to persist config: " + err.Error())
 		}
 		localIP := getLocalIPForAPI()
-		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, localIP)
+		s.mgr.Sync(s.ctx, s.cfg.Peers, s.cfg.DRA, s.cfg.Watchdog, s.cfg.Reconnect, s.cfg.TLS, localIP)
 		return nil, nil
 	})
 }

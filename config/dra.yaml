@@ -9,6 +9,13 @@
 dra:
   identity: "dra.epc.mnc435.mcc311.3gppnetwork.org"
   realm: "epc.mnc435.mcc311.3gppnetwork.org"
+  # QoS is a work in progress. Currently usable modes are:
+  #   clear - send best-effort/CS0
+  #   set   - force the configured outbound DSCP
+  # preserve is experimental and does not currently preserve received SCTP DSCP.
+  qos:
+    mode: clear              # clear | set
+    dscp: 0                  # used only with mode: set; valid DSCP range is 0..63
 
 # ---------------------------------------------------------------------------
 # Listeners - all entries start concurrently at startup.
@@ -27,12 +34,8 @@ listeners:
     address: "0.0.0.0"
     port: 5868
 
-  - transport: sctp+tls
-    address: "0.0.0.0"
-    port: 5868
-
 # ---------------------------------------------------------------------------
-# TLS - one certificate shared by ALL TLS listeners (tcp+tls and sctp+tls).
+# TLS - one certificate shared by TCP+TLS listeners and outbound TCP+TLS peers.
 # ---------------------------------------------------------------------------
 tls:
   cert: /etc/vectorcore-dra/server.crt
@@ -104,7 +107,7 @@ peers:
     fqdn: hss01.epc.mnc435.mcc311.3gppnetwork.org
     address: 10.0.0.10        # IP address preferred; FQDN also accepted (DNS resolved per attempt)
     port: 3868
-    transport: tcp            # tcp | tcp+tls | sctp | sctp+tls
+    transport: tcp            # tcp | tcp+tls | sctp
     mode: active              # active = we connect | passive = they connect to us
     realm: epc.mnc435.mcc311.3gppnetwork.org
     lb_group: hss_group
@@ -149,9 +152,11 @@ peers:
     lb_group: roaming_ipe
     enabled: true
 
-# IMSI prefix routing - evaluated BEFORE route_rules. Longest prefix wins.
-# Extracts IMSI from Subscription-Id AVP (Gx/Gy) or User-Name AVP (S6a/SWx).
-# On match: overwrites Destination-Realm and routes to the named lb_group.
+# IMSI prefix routing - WORK IN PROGRESS, not currently functional.
+# Evaluated after explicit route_rules when no rule matches.
+# Longest prefix wins. Extracts IMSI from Subscription-Id AVP (Gx/Gy) or
+# User-Name AVP (S6a/SWx). On match: uses dest_realm for group selection and,
+# if no group member is open, falls back to implicit realm routing.
 #
 # prefix: MCC+MNC digits only - 5 digits (2-digit MNC) or 6 digits (3-digit MNC).
 #   311435  -> MCC=311 MNC=435
@@ -179,7 +184,7 @@ imsi_routes:
     lb_group: roaming_ipe
     priority: 10
 
-# Route rules - OPTIONAL. Evaluated after IMSI routes.
+# Route rules - OPTIONAL. Evaluated before IMSI routes.
 #
 # You do NOT need route_rules for normal operation. The DRA automatically routes
 # Destination-Realm to any OPEN peer whose realm matches - exactly like freeDiameter's

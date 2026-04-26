@@ -459,7 +459,6 @@ function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
                 <option value="tcp">tcp</option>
                 <option value="sctp">sctp</option>
                 <option value="tcp+tls">tcp+tls</option>
-                <option value="sctp+tls">sctp+tls</option>
               </select>
             </div>
             <div className="form-group">
@@ -558,7 +557,6 @@ function AddPeerModal({ lbGroups, onClose, onCreated }) {
                 <option value="tcp">tcp</option>
                 <option value="sctp">sctp</option>
                 <option value="tcp+tls">tcp+tls</option>
-                <option value="sctp+tls">sctp+tls</option>
               </select>
             </div>
             <div className="form-group">

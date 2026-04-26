@@ -26,12 +26,12 @@ var (
 // Router evaluates routing rules against Diameter messages and selects a peer.
 type Router struct {
 	mu         sync.RWMutex
-	localID    string               // DRA's own Diameter identity (loop detection)
-	rules      []Rule               // sorted by priority
-	imsiRoutes imsiTable            // sorted by prefix length desc
+	localID    string                // DRA's own Diameter identity (loop detection)
+	rules      []Rule                // sorted by priority
+	imsiRoutes imsiTable             // sorted by prefix length desc
 	peers      map[string]*peer.Peer // keyed by FQDN
-	groups     map[string][]string  // group name -> peer FQDNs
-	groupLB    map[string]Selector  // group name -> LB selector
+	groups     map[string][]string   // group name -> peer FQDNs
+	groupLB    map[string]Selector   // group name -> LB selector
 	log        *zap.Logger
 }
 
@@ -62,6 +62,20 @@ func (r *Router) UpdateIMSIRoutes(routes []IMSIRoute) {
 	r.imsiRoutes = table
 	r.mu.Unlock()
 	r.log.Info("IMSI routes updated", zap.Int("count", len(table)))
+}
+
+// UpdateGroupPolicies atomically replaces the explicit lb-group policy table.
+// Groups without an explicit policy fall back to round-robin selection.
+func (r *Router) UpdateGroupPolicies(policies map[string]string) {
+	groupLB := make(map[string]Selector, len(policies))
+	for name, policy := range policies {
+		groupLB[name] = NewSelector(policy)
+	}
+
+	r.mu.Lock()
+	r.groupLB = groupLB
+	r.mu.Unlock()
+	r.log.Info("lb group policies updated", zap.Int("count", len(groupLB)))
 }
 
 // SetGroupPolicy sets the load-balancing policy for an lb group.

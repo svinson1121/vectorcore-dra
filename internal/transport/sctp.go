@@ -5,16 +5,23 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"syscall"
 
 	"github.com/ishidawataru/sctp"
 )
 
 // SCTP is a plain SCTP transport using the ishidawataru/sctp library.
-type SCTP struct{}
+type SCTP struct {
+	qos QoSPolicy
+}
 
 // NewSCTP creates a new plain SCTP transport.
-func NewSCTP() *SCTP {
-	return &SCTP{}
+func NewSCTP(qos ...QoSPolicy) *SCTP {
+	policy := DefaultQoS()
+	if len(qos) > 0 {
+		policy = qos[0]
+	}
+	return &SCTP{qos: policy}
 }
 
 // Dial establishes an SCTP connection to addr ("host:port").
@@ -53,7 +60,18 @@ func (t *SCTP) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		conn, err := sctp.DialSCTP("sctp", nil, sctpAddr)
+		socketCfg := &sctp.SocketConfig{
+			Control: func(network, address string, c syscall.RawConn) error {
+				if err := t.qos.Control(network, address, c); err != nil {
+					return err
+				}
+				if t.qos.Preserve() {
+					return EnableReceiveTOSControl(c)
+				}
+				return nil
+			},
+		}
+		conn, err := socketCfg.Dial("sctp", nil, sctpAddr)
 		ch <- result{conn, err}
 	}()
 
@@ -61,7 +79,17 @@ func (t *SCTP) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case r := <-ch:
-		return r.conn, r.err
+		if r.err != nil {
+			return nil, r.err
+		}
+		if err := t.qos.Apply(r.conn); err != nil {
+			r.conn.Close()
+			return nil, err
+		}
+		if t.qos.Preserve() {
+			r.conn = WrapPreserveSCTP(r.conn)
+		}
+		return r.conn, nil
 	}
 }
 
@@ -89,9 +117,24 @@ func (t *SCTP) Listen(addr string) (net.Listener, error) {
 	}
 
 	sctpAddr := &sctp.SCTPAddr{IPAddrs: addrs, Port: port}
-	ln, err := sctp.ListenSCTP("sctp", sctpAddr)
+	socketCfg := &sctp.SocketConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			if err := t.qos.Control(network, address, c); err != nil {
+				return err
+			}
+			if t.qos.Preserve() {
+				return EnableReceiveTOSControl(c)
+			}
+			return nil
+		},
+	}
+	ln, err := socketCfg.Listen("sctp", sctpAddr)
 	if err != nil {
 		return nil, fmt.Errorf("sctp: listen on %s: %w", addr, err)
+	}
+	if err := t.qos.Apply(ln); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("sctp: setting qos on listener: %w", err)
 	}
 	return ln, nil
 }

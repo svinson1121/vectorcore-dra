@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/svinson1121/vectorcore-dra/internal/api"
+	"github.com/svinson1121/vectorcore-dra/internal/buildinfo"
 	"github.com/svinson1121/vectorcore-dra/internal/config"
 	"github.com/svinson1121/vectorcore-dra/internal/logging"
 	"github.com/svinson1121/vectorcore-dra/internal/metrics"
@@ -22,19 +23,14 @@ import (
 	"github.com/svinson1121/vectorcore-dra/internal/transport"
 )
 
-const (
-	appVersion = "0.2.0B"
-	apiVersion = "0.2.0B"
-)
-
 func main() {
 	debugMode := flag.Bool("d", false, "debug mode: log at DEBUG level to file+console, overrides config")
-	cfgFlag   := flag.String("c", "", "path to config.yaml")
-	showVer   := flag.Bool("v", false, "print version and exit")
+	cfgFlag := flag.String("c", "", "path to config.yaml")
+	showVer := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("VectorCore DRA  v%s (API v%s)\n", appVersion, apiVersion)
+		fmt.Printf("VectorCore DRA  v%s (API v%s)\n", buildinfo.Version, buildinfo.Version)
 		os.Exit(0)
 	}
 
@@ -69,6 +65,8 @@ func main() {
 		zap.String("realm", cfg.DRA.Realm),
 		zap.String("config_file", cfgPath),
 		zap.Bool("debug_mode", *debugMode),
+		zap.String("qos_mode", cfg.DRA.QoS.Mode),
+		zap.Int("qos_dscp", cfg.DRA.QoS.DSCP),
 	)
 
 	localIP := getLocalIP()
@@ -80,19 +78,14 @@ func main() {
 	// Build router and peer manager
 	r := router.New(cfg.DRA.Identity, log)
 	mgr := peermgr.New(r, cfg.DRA.Identity, log)
+	apiSrv := api.New(ctx, cfg, cfgPath, mgr, r, log)
 
-	// Load initial route rules and IMSI routes
-	r.UpdateRules(configRulesToRouterRules(cfg.RouteRules))
-	r.UpdateIMSIRoutes(configIMSIToRouterIMSI(cfg.IMSIRoutes))
-
-	// Initial peer sync
-	mgr.Sync(ctx, cfg.Peers, cfg.DRA, cfg.Watchdog, cfg.Reconnect, localIP)
+	// Apply initial mutable config
+	apiSrv.ApplyConfig(cfg)
 
 	// Start manager background goroutines (pending-entry sweep, etc.)
 	mgr.Start(ctx)
 
-	// Start HTTP API server
-	apiSrv := api.New(ctx, cfg, cfgPath, mgr, r, log)
 	mgr.SetRecorder(apiSrv.RecentMsgs)
 	httpAddr := fmt.Sprintf("%s:%d", cfg.API.Address, cfg.API.Port)
 	go func() {
@@ -104,9 +97,7 @@ func main() {
 	// Config file watcher for hot reload
 	watcher, watchErr := config.NewWatcher(cfgPath, func(newCfg *config.Config) {
 		log.Info("applying hot-reloaded config")
-		r.UpdateRules(configRulesToRouterRules(newCfg.RouteRules))
-		r.UpdateIMSIRoutes(configIMSIToRouterIMSI(newCfg.IMSIRoutes))
-		mgr.Sync(ctx, newCfg.Peers, newCfg.DRA, newCfg.Watchdog, newCfg.Reconnect, localIP)
+		apiSrv.ApplyConfig(newCfg)
 	}, log)
 	if watchErr != nil {
 		log.Warn("config file watcher not started", zap.Error(watchErr))
@@ -119,7 +110,7 @@ func main() {
 	listeners := startListeners(ctx, cfg, mgr, log)
 	if len(listeners) == 0 {
 		// Fallback: default TCP listener
-		t := transport.NewTCP()
+		t := transport.NewTCP(qosFromConfig(cfg, log))
 		ln, err := t.Listen("0.0.0.0:3868")
 		if err != nil {
 			log.Fatal("failed to start default listener", zap.Error(err))
@@ -166,23 +157,24 @@ func startListeners(ctx context.Context, cfg *config.Config, mgr *peermgr.Manage
 		go func() {
 			defer wg.Done()
 			addr := fmt.Sprintf("%s:%d", lcfg.Address, lcfg.Port)
+			qos := qosFromConfig(cfg, log)
 
 			var t transport.Transport
 			switch lcfg.Transport {
 			case "tcp":
-				t = transport.NewTCP()
+				t = transport.NewTCP(qos)
 			case "tcp+tls":
 				t = transport.NewTCPTLS(transport.TLSConfig{
 					CertFile: cfg.TLS.CertFile,
 					KeyFile:  cfg.TLS.KeyFile,
 					CAFile:   cfg.TLS.CAFile,
-				})
+				}, qos)
 			case "sctp":
-				t = transport.NewSCTP()
+				t = transport.NewSCTP(qos)
 			case "sctp+tls":
 				// SCTP+TLS deferred - fall back to plain SCTP
 				log.Warn("sctp+tls not yet supported, using plain sctp", zap.String("addr", addr))
-				t = transport.NewSCTP()
+				t = transport.NewSCTP(qos)
 			default:
 				log.Error("unknown transport in listener config, skipping",
 					zap.String("transport", lcfg.Transport),
@@ -204,6 +196,8 @@ func startListeners(ctx context.Context, cfg *config.Config, mgr *peermgr.Manage
 			log.Info("listening for Diameter connections",
 				zap.String("addr", addr),
 				zap.String("transport", lcfg.Transport),
+				zap.String("qos_mode", qos.Mode),
+				zap.Int("qos_dscp", qos.DSCP),
 			)
 
 			mu.Lock()
@@ -215,6 +209,14 @@ func startListeners(ctx context.Context, cfg *config.Config, mgr *peermgr.Manage
 	}
 	wg.Wait()
 	return listeners
+}
+
+func qosFromConfig(cfg *config.Config, log *zap.Logger) transport.QoSPolicy {
+	qos, err := transport.NewQoSPolicy(cfg.DRA.QoS.Mode, cfg.DRA.QoS.DSCP)
+	if err != nil {
+		log.Fatal("invalid DRA QoS config", zap.Error(err))
+	}
+	return qos
 }
 
 // acceptLoop accepts inbound Diameter connections on ln.
@@ -234,6 +236,20 @@ func acceptLoop(ctx context.Context, ln net.Listener, transportName string, cfg 
 		}
 
 		remoteAddr := conn.RemoteAddr().String()
+		qos := qosFromConfig(cfg, log)
+		if qos.Preserve() && transportName == "tcp" {
+			conn = transport.WrapPreserveTCP(conn)
+		}
+		if qos.Preserve() && (transportName == "sctp" || transportName == "sctp+tls") {
+			conn = transport.WrapPreserveSCTP(conn)
+		}
+		if err := qos.Apply(conn); err != nil {
+			log.Warn("failed to apply qos on accepted connection",
+				zap.String("remote", remoteAddr),
+				zap.String("transport", transportName),
+				zap.Error(err),
+			)
+		}
 
 		// Security: drop connections from unknown sources
 		if !mgr.IsKnownAddress(conn.RemoteAddr()) {

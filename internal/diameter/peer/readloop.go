@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/svinson1121/vectorcore-dra/internal/diameter/message"
+	"github.com/svinson1121/vectorcore-dra/internal/transport"
 )
 
 // readLoop reads messages from conn and dispatches them to the appropriate handler.
@@ -55,9 +56,15 @@ func (p *Peer) writeLoop(ctx context.Context, conn net.Conn, writeErrCh chan<- e
 			return
 		case <-sessionDone:
 			return
-		case msg, ok := <-p.writeCh:
+		case out, ok := <-p.writeCh:
 			if !ok {
 				return
+			}
+			msg := out.msg
+			if out.tos != nil && p.cfg.QoS.Preserve() {
+				if err := transport.ApplyTOS(conn, *out.tos); err != nil {
+					p.log.Warn("failed to apply preserved qos", zap.Error(err))
+				}
 			}
 			encoded, err := msg.Encode()
 			if err != nil {

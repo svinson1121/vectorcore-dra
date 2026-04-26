@@ -162,8 +162,15 @@ func (m *Manager) Sync(
 	localCfg config.DRAConfig,
 	watchdog config.WatchdogConfig,
 	reconnect config.ReconnectConfig,
+	tls config.TLSConfig,
 	localIP net.IP,
 ) {
+	qos, err := transport.NewQoSPolicy(localCfg.QoS.Mode, localCfg.QoS.DSCP)
+	if err != nil {
+		m.log.Error("invalid DRA QoS config, using clear", zap.Error(err))
+		qos = transport.DefaultQoS()
+	}
+
 	// Build desired set (enabled peers only) and track disabled peer IPs for diagnostics.
 	desired := make(map[string]config.Peer)
 	newDisabled := make(map[string]string) // IP -> name
@@ -184,7 +191,7 @@ func (m *Manager) Sync(
 	// Remove peers not in desired set, or whose config changed
 	for name, running := range m.peers {
 		cfg, ok := desired[name]
-		if !ok || peerConfigChanged(running.Cfg(), cfg) {
+		if !ok || peerConfigChanged(running.Cfg(), cfg, qos) {
 			m.log.Info("stopping peer", zap.String("peer", name))
 			m.router.RemovePeer(running.Cfg().FQDN)
 			running.Stop()
@@ -204,7 +211,13 @@ func (m *Manager) Sync(
 			mode = "active"
 		}
 
-		t, err := selectTransport(cfg.Transport, cfg)
+		if cfg.Transport == "sctp+tls" {
+			m.log.Warn("sctp+tls not yet supported for peers, using plain sctp",
+				zap.String("peer", name),
+			)
+		}
+
+		t, err := selectTransport(cfg.Transport, tls, qos)
 		if err != nil {
 			m.log.Error("invalid transport for peer, skipping",
 				zap.String("peer", name),
@@ -232,7 +245,7 @@ func (m *Manager) Sync(
 			continue
 		}
 
-		m.startPeerLocked(ctx, cfg, localCfg, watchdog, localIP, t, mode, resolvedIP, initialBackoff, maxBackoff)
+		m.startPeerLocked(ctx, cfg, localCfg, watchdog, localIP, t, mode, resolvedIP, qos, initialBackoff, maxBackoff)
 	}
 }
 
@@ -250,6 +263,10 @@ func (m *Manager) dnsRetryLoop(
 	mode string,
 	initialBackoff, maxBackoff time.Duration,
 ) {
+	qos, err := transport.NewQoSPolicy(localCfg.QoS.Mode, localCfg.QoS.DSCP)
+	if err != nil {
+		qos = transport.DefaultQoS()
+	}
 	backoff := initialBackoff
 	for {
 		select {
@@ -288,7 +305,7 @@ func (m *Manager) dnsRetryLoop(
 		m.mu.Lock()
 		// Double-check under lock - a concurrent Sync may have already added it
 		if _, exists := m.peers[cfg.Name]; !exists {
-			m.startPeerLocked(ctx, cfg, localCfg, watchdog, localIP, t, mode, resolvedIP, initialBackoff, maxBackoff)
+			m.startPeerLocked(ctx, cfg, localCfg, watchdog, localIP, t, mode, resolvedIP, qos, initialBackoff, maxBackoff)
 		}
 		m.mu.Unlock()
 		return
@@ -306,6 +323,7 @@ func (m *Manager) startPeerLocked(
 	t transport.Transport,
 	mode string,
 	resolvedIP string,
+	qos transport.QoSPolicy,
 	initialBackoff, maxBackoff time.Duration,
 ) {
 	dialAddr := fmt.Sprintf("%s:%d", resolvedIP, cfg.Port)
@@ -331,6 +349,7 @@ func (m *Manager) startPeerLocked(
 		InitialBackoff:   initialBackoff,
 		MaxBackoff:       maxBackoff,
 		Inbound:          mode == "passive",
+		QoS:              qos,
 	}
 
 	p := peer.New(pCfg, m.log)
@@ -449,7 +468,7 @@ func (m *Manager) Forward(src *peer.Peer, msg *message.Message) error {
 			msg.Header.CommandCode, msg.Header.AppID, true, 0, sid)
 	}
 
-	if err := target.Send(msg); err != nil {
+	if err := m.sendWithPreservedQoS(src, target, msg); err != nil {
 		target.DecrInFlight()
 		m.pendingMu.Lock()
 		delete(m.pending, newHopByHop)
@@ -475,6 +494,28 @@ func (m *Manager) Get(name string) (*peer.Peer, bool) {
 	defer m.mu.RUnlock()
 	p, ok := m.peers[name]
 	return p, ok
+}
+
+func (m *Manager) sendWithPreservedQoS(src, target *peer.Peer, msg *message.Message) error {
+	if !target.Cfg().QoS.Preserve() {
+		return target.Send(msg)
+	}
+	if tos, ok := src.CurrentTOS(); ok {
+		m.log.Debug("applying preserved qos",
+			zap.String("from_peer", src.Cfg().Name),
+			zap.String("to_peer", target.Cfg().Name),
+			zap.Int("tos", tos),
+			zap.Int("dscp", tos>>2),
+		)
+		return target.SendWithTOS(msg, tos)
+	}
+	m.log.Warn("qos preserve requested but no inbound tos captured",
+		zap.String("from_peer", src.Cfg().Name),
+		zap.String("from_transport", src.Cfg().TransportName),
+		zap.String("to_peer", target.Cfg().Name),
+		zap.String("to_transport", target.Cfg().TransportName),
+	)
+	return target.Send(msg)
 }
 
 // HasConfiguredPeer returns true if the address belongs to any configured peer
@@ -551,7 +592,7 @@ func (m *Manager) makeForwarder() func(*peer.Peer, *message.Message) {
 
 			// Restore the original hop-by-hop and relay back to the originator.
 			msg.Header.HopByHop = entry.origHopByHop
-			if err := entry.fromPeer.Send(msg); err != nil {
+			if err := m.sendWithPreservedQoS(src, entry.fromPeer, msg); err != nil {
 				m.log.Warn("failed to relay answer to originator",
 					zap.Uint32("cmd", msg.Header.CommandCode),
 					zap.String("to_peer", entry.fromPeer.Cfg().Name),
@@ -604,29 +645,32 @@ func isFSMCommand(code uint32) bool {
 }
 
 // peerConfigChanged returns true if any field that would require a restart differs.
-func peerConfigChanged(running peer.Config, desired config.Peer) bool {
+func peerConfigChanged(running peer.Config, desired config.Peer, qos transport.QoSPolicy) bool {
 	return running.OrigAddress != desired.Address ||
 		running.Port != desired.Port ||
 		running.FQDN != desired.FQDN ||
 		running.Realm != desired.Realm ||
 		running.TransportName != desired.Transport ||
-		running.Mode != desired.Mode
+		running.Mode != desired.Mode ||
+		running.QoS != qos
 }
 
 // selectTransport returns the appropriate Transport for the given protocol string.
-func selectTransport(proto string, cfg config.Peer) (transport.Transport, error) {
+func selectTransport(proto string, tlsCfg config.TLSConfig, qos transport.QoSPolicy) (transport.Transport, error) {
 	switch proto {
 	case "tcp":
-		return transport.NewTCP(), nil
+		return transport.NewTCP(qos), nil
 	case "tcp+tls":
-		// TLS config is not per-peer in current schema - use listener TLS config
-		// For now return plain TCP with a note; full TLS requires cert paths on peer
-		return transport.NewTCP(), nil
+		return transport.NewTCPTLS(transport.TLSConfig{
+			CertFile: tlsCfg.CertFile,
+			KeyFile:  tlsCfg.KeyFile,
+			CAFile:   tlsCfg.CAFile,
+		}, qos), nil
 	case "sctp":
-		return transport.NewSCTP(), nil
+		return transport.NewSCTP(qos), nil
 	case "sctp+tls":
 		// SCTP+TLS (DTLS per RFC 6083) - deferred; fall back to plain SCTP
-		return transport.NewSCTP(), nil
+		return transport.NewSCTP(qos), nil
 	default:
 		return nil, fmt.Errorf("unknown transport %q", proto)
 	}

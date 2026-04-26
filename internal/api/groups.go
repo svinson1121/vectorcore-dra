@@ -57,11 +57,11 @@ func registerPeerGroups(api huma.API, s *Server) {
 			policy = "round_robin"
 		}
 		s.cfg.LBGroups = append(s.cfg.LBGroups, config.LBGroup{Name: b.Name, LBPolicy: policy})
-		s.router.SetGroupPolicy(b.Name, policy)
 		if err := s.saveConfig(); err != nil {
 			s.cfg.LBGroups = s.cfg.LBGroups[:len(s.cfg.LBGroups)-1]
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		s.syncRouterGroups()
 		return &struct{ Body LBGroupResponse }{Body: LBGroupResponse{Name: b.Name, LBPolicy: policy}}, nil
 	})
 
@@ -85,10 +85,10 @@ func registerPeerGroups(api huma.API, s *Server) {
 		if !found {
 			return nil, huma.Error404NotFound(fmt.Sprintf("lb group %q not found", input.Name))
 		}
-		s.router.SetGroupPolicy(input.Name, input.Body.LBPolicy)
 		if err := s.saveConfig(); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		s.syncRouterGroups()
 		return &struct{ Body LBGroupResponse }{Body: LBGroupResponse{Name: input.Name, LBPolicy: input.Body.LBPolicy}}, nil
 	})
 
@@ -117,6 +117,7 @@ func registerPeerGroups(api huma.API, s *Server) {
 		if err := s.saveConfig(); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		s.syncRouterGroups()
 		return nil, nil
 	})
 }
