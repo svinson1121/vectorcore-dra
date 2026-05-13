@@ -14,32 +14,45 @@ import (
 
 // knownAppIDs maps Diameter Application-ID to a short human-readable name.
 var knownAppIDs = map[uint32]string{
-	0:          "Common",
-	1:          "NASREQ",
-	2:          "MobileIPv4",
-	3:          "Accounting",
-	4:          "DCCA",
-	16777216:   "Cx/Dx",
-	16777217:   "Sh",
-	16777219:   "Wx",
-	16777222:   "Gq",
-	16777224:   "Ro",
-	16777236:   "Rx",
-	16777238:   "Gx",
-	16777239:   "Gy",
-	16777251:   "S6a",
-	16777252:   "S13",
-	16777255:   "SLg",
-	16777264:   "SWm",
-	16777265:   "SWx",
-	16777267:   "S9",
-	16777268:   "S6b",
-	16777272:   "S6b-PGW",
-	16777291:   "SLh",
-	16777312:   "S6c",
-	16777313:   "SGd",
-	16777221:   "Zh",
-	16777302:   "PC4a",
+	// Base
+	0: "Common",
+	4: "DCCA", // Used by Gy/Ro-style credit-control
+
+	// IMS / subscriber data
+	16777216: "Cx/Dx",
+	16777217: "Sh",
+	16777219: "Wx",
+	16777221: "Zh",
+
+	// Policy / charging
+	16777222: "Gq",
+	16777224: "Gx", // older/legacy Gx allocation
+	16777229: "Rx", // older/legacy Rx allocation
+	16777236: "Rx",
+	16777238: "Gx",
+
+	// EPC / EAP / non-3GPP access
+	16777250: "STa",
+	16777251: "S6a/S6d",
+	16777252: "S13",
+	16777255: "SLg",
+	16777264: "SWm",
+	16777265: "SWx",
+	16777266: "Gxx",
+	16777267: "S9",
+	16777272: "S6b",
+	16777291: "SLh",
+
+	// SMS / MTC / ProSe / later EPC interfaces
+	16777302: "Sy",
+	16777303: "Sd",
+	16777310: "S6m",
+	16777311: "T4",
+	16777312: "S6c",
+	16777313: "SGd",
+	16777336: "PC4a",
+
+	// Diameter relay
 	0xFFFFFFFF: "Relay",
 }
 

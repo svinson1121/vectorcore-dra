@@ -13,19 +13,17 @@ import {
 
 const APP_ID_NAMES = {
   0: 'any',
-  1: 'NASREQ',
-  2: 'MobileIPv4',
-  3: 'BaseAcct',
-  4: 'CreditControl',
+  4: 'DCCA',
   16777216: 'Cx/Dx',
   16777217: 'Sh',
   16777219: 'Wx',
   16777221: 'Zh',
   16777236: 'Rx',
   16777238: 'Gx',
-  16777239: 'Gy',
-  16777251: 'S6a',
+  16777250: 'STa',
+  16777251: 'S6a/S6d',
   16777252: 'S13',
+  16777255: 'SLg',
   16777264: 'SWm',
   16777265: 'SWx',
   16777267: 'S9',
@@ -33,7 +31,6 @@ const APP_ID_NAMES = {
   16777291: 'SLh',
   16777312: 'S6c',
   16777313: 'SGd',
-  4294967295: 'Relay',
 }
 
 function appLabel(id) {
@@ -336,26 +333,25 @@ function RouteModal({ initial, lbGroups, onClose, onSaved }) {
             <div className="form-group">
               <label className="form-label">App ID</label>
               <select className="select" value={form.app_id} onChange={e => set('app_id', e.target.value)}>
-                <option value={0}>0 — any (wildcard)</option>
-                <option value={1}>1 — NASREQ</option>
-                <option value={3}>3 — Base Accounting</option>
-                <option value={4}>4 — Credit-Control / Gy/Ro (RFC 4006)</option>
-                <option value={16777216}>16777216 — Cx/Dx</option>
-                <option value={16777217}>16777217 — Sh</option>
-                <option value={16777219}>16777219 — Wx</option>
-                <option value={16777221}>16777221 — Zh</option>
-                <option value={16777236}>16777236 — Rx</option>
-                <option value={16777238}>16777238 — Gx</option>
-                <option value={16777239}>16777239 — Gy (3GPP vendor-specific)</option>
-                <option value={16777251}>16777251 — S6a</option>
-                <option value={16777252}>16777252 — S13</option>
-                <option value={16777264}>16777264 — SWm</option>
-                <option value={16777265}>16777265 — SWx</option>
-                <option value={16777267}>16777267 — S9</option>
-                <option value={16777272}>16777272 — S6b</option>
-                <option value={16777291}>16777291 — SLh</option>
-                <option value={16777312}>16777312 — S6c</option>
-                <option value={16777313}>16777313 — SGd</option>
+                <option value={0}>0 - Any (wildcard)</option>
+                <option value={4}>4 - DCCA / Gy/Ro (RFC 4006)</option>
+                <option value={16777216}>16777216 - Cx/Dx</option>
+                <option value={16777217}>16777217 - Sh</option>
+                <option value={16777219}>16777219 - Wx</option>
+                <option value={16777221}>16777221 - Zh</option>
+                <option value={16777236}>16777236 - Rx</option>
+                <option value={16777238}>16777238 - Gx</option>
+		<option value={16777250}>16777250 - STa</option>
+                <option value={16777251}>16777251 - S6a/S6d</option>
+                <option value={16777252}>16777252 - S13</option>
+		<option value={16777255}>16777255 - SLg</option>
+                <option value={16777264}>16777264 - SWm</option>
+                <option value={16777265}>16777265 - SWx</option>
+                <option value={16777267}>16777267 - S9</option>
+                <option value={16777272}>16777272 - S6b</option>
+                <option value={16777291}>16777291 - SLh</option>
+                <option value={16777312}>16777312 - S6c</option>
+                <option value={16777313}>16777313 - SGd</option>
               </select>
             </div>
             <div className="form-group">
