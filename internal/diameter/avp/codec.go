@@ -82,6 +82,9 @@ func Decode(b []byte) (*AVP, int, error) {
 			return nil, 0, errors.New("avp: buffer too short for vendor-specific header")
 		}
 		a.VendorID = binary.BigEndian.Uint32(b[8:12])
+		if a.VendorID == 0 {
+			return nil, 0, errors.New("avp: vendor-specific flag set with Vendor-ID 0")
+		}
 		hdrSize = 12
 	}
 
@@ -98,10 +101,12 @@ func Decode(b []byte) (*AVP, int, error) {
 	a.Data = make([]byte, dataLen)
 	copy(a.Data, b[hdrSize:hdrSize+dataLen])
 
-	// consumed = padded to 4-byte boundary
+	// AVPs are padded to a 4-byte boundary on the wire. The padding is not
+	// included in the AVP length, but it must be present in the containing
+	// Diameter message.
 	consumed := (totalWithHeader + 3) &^ 3
 	if consumed > len(b) {
-		consumed = len(b)
+		return nil, 0, fmt.Errorf("avp: buffer too short for padding: need %d bytes, have %d", consumed, len(b))
 	}
 
 	return a, consumed, nil

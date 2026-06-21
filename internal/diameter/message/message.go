@@ -11,10 +11,10 @@ import (
 
 // Message flag bits
 const (
-	FlagRequest     = 0x80
-	FlagProxiable   = 0x40
-	FlagError       = 0x20
-	FlagRetransmit  = 0x10
+	FlagRequest    = 0x80
+	FlagProxiable  = 0x40
+	FlagError      = 0x20
+	FlagRetransmit = 0x10
 
 	HeaderLen = 20
 )
@@ -94,6 +94,9 @@ func Decode(r io.Reader) (*Message, error) {
 	if totalLen < HeaderLen {
 		return nil, fmt.Errorf("message: message length %d too short (min %d)", totalLen, HeaderLen)
 	}
+	if totalLen%4 != 0 {
+		return nil, fmt.Errorf("message: message length %d is not 4-byte aligned", totalLen)
+	}
 
 	// Read remaining bytes
 	rest := make([]byte, totalLen-4)
@@ -118,15 +121,24 @@ func decodeBytes(b []byte) (*Message, error) {
 	m := &Message{}
 	m.Header.Version = b[0]
 	m.Header.Length = uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	if m.Header.Version != 1 {
+		return nil, fmt.Errorf("message: unsupported Diameter version %d", m.Header.Version)
+	}
+	if m.Header.Length < HeaderLen {
+		return nil, fmt.Errorf("message: message length %d too short (min %d)", m.Header.Length, HeaderLen)
+	}
+	if m.Header.Length%4 != 0 {
+		return nil, fmt.Errorf("message: message length %d is not 4-byte aligned", m.Header.Length)
+	}
+	if int(m.Header.Length) > len(b) {
+		return nil, fmt.Errorf("message: declared length %d exceeds buffer %d", m.Header.Length, len(b))
+	}
+
 	m.Header.Flags = b[4]
 	m.Header.CommandCode = uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
 	m.Header.AppID = binary.BigEndian.Uint32(b[8:12])
 	m.Header.HopByHop = binary.BigEndian.Uint32(b[12:16])
 	m.Header.EndToEnd = binary.BigEndian.Uint32(b[16:20])
-
-	if int(m.Header.Length) > len(b) {
-		return nil, fmt.Errorf("message: declared length %d exceeds buffer %d", m.Header.Length, len(b))
-	}
 
 	avpData := b[HeaderLen:m.Header.Length]
 	var err error
