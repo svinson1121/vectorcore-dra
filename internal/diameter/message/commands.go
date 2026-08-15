@@ -32,6 +32,8 @@ const (
 	CmdNotify               = 323     // NOR/NOA (3GPP TS 29.272, S6a/S13)
 	CmdEquipmentCheck       = 324     // ECR/ECA (3GPP TS 29.272, S13 EIR)
 	CmdDiameterEAP          = 268     // DER/DEA (RFC 4072 / 3GPP TS 29.273, STa/SWm)
+	CmdProvideLocation      = 8388620 // PLR/PLA (3GPP TS 29.172, SLg)
+	CmdLocationReport       = 8388621 // LRR/LRA (3GPP TS 29.172, SLg)
 	CmdRoutingInfo          = 8388622 // RIR/RIA (3GPP TS 29.173, SLh)
 	CmdTriggerEstablishment = 8388656 // TER/TEA (3GPP TS 29.215, S9)
 	CmdMOForwardShortMsg    = 8388645 // OFR/OFA (3GPP TS 29.338, SGd)
@@ -74,6 +76,7 @@ const (
 	App3GPP_STa uint32 = 16777250 // STa trusted non-3GPP access to 3GPP AAA Server
 	App3GPP_S6a uint32 = 16777251 // S6a MME-HSS
 	App3GPP_S13 uint32 = 16777252 // S13 EIR
+	App3GPP_SLg uint32 = 16777255 // SLg MME/SGSN-GMLC location services
 	App3GPP_SWm uint32 = 16777264 // SWm ePDG-AAA (3GPP TS 29.273)
 	App3GPP_SWx uint32 = 16777265 // SWx HSS-AAA (EPC WiFi)
 	App3GPP_S9  uint32 = 16777267 // S9 V-PCRF/H-PCRF (3GPP TS 29.215)
@@ -179,16 +182,20 @@ var appCommandNames = map[uint32]map[uint32]string{
 		CmdSessionTermination: "STR/STA",
 	},
 	App3GPP_STa: {
-        	CmdDiameterEAP:         "DER/DEA",
-        	CmdReAuth:              "RAR/RAA",
-        	CmdAbortSession:        "ASR/ASA",
-        	CmdSessionTermination:  "STR/STA",
+		CmdDiameterEAP:        "DER/DEA",
+		CmdReAuth:             "RAR/RAA",
+		CmdAbortSession:       "ASR/ASA",
+		CmdSessionTermination: "STR/STA",
 	},
 	App3GPP_S9: {
 		CmdReAuth:               "RAR/RAA",
 		CmdCreditControl:        "CCR/CCA",
 		CmdAbortSession:         "ASR/ASA",
 		CmdTriggerEstablishment: "TER/TEA",
+	},
+	App3GPP_SLg: {
+		CmdProvideLocation: "PLR/PLA",
+		CmdLocationReport:  "LRR/LRA",
 	},
 	App3GPP_SLh: {
 		CmdRoutingInfo: "RIR/RIA",

@@ -22,6 +22,8 @@ func TestCommandName(t *testing.T) {
 		{name: "s13 324 is equipment check", app: App3GPP_S13, cmd: CmdEquipmentCheck, want: "ECR/ECA"},
 		{name: "rx aa", app: App3GPP_Rx, cmd: CmdAA, want: "AAR/AAA"},
 		{name: "gx credit control", app: App3GPP_Gx, cmd: CmdCreditControl, want: "CCR/CCA"},
+		{name: "slg plr", app: App3GPP_SLg, cmd: CmdProvideLocation, want: "PLR/PLA"},
+		{name: "slg lrr", app: App3GPP_SLg, cmd: CmdLocationReport, want: "LRR/LRA"},
 		{name: "slh rir", app: App3GPP_SLh, cmd: CmdRoutingInfo, want: "RIR/RIA"},
 		{name: "s6c srr", app: App3GPP_S6c, cmd: CmdSendRoutingInfoSM, want: "SRR/SRA"},
 		{name: "s6c alr", app: App3GPP_S6c, cmd: CmdAlertServiceCentre, want: "ALR/ALA"},
