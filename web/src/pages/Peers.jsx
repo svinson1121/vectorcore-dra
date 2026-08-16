@@ -2,9 +2,12 @@ import React, { useState, useCallback, useMemo } from 'react'
 import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, RefreshCw, XCircle } from 'lucide-react'
 import Badge from '../components/Badge.jsx'
 import Modal from '../components/Modal.jsx'
+import DiscardConfirm from '../components/DiscardConfirm.jsx'
 import Spinner from '../components/Spinner.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { usePoller } from '../hooks/usePoller.js'
+import { useDirtyState } from '../hooks/useDirtyState.js'
+import { useConfirmClose } from '../hooks/useConfirmClose.js'
 import { getPeers, getPeerStatus, createPeer, updatePeer, deletePeer, getLBGroups } from '../api/client.js'
 
 const APP_ID_NAMES = {
@@ -382,7 +385,7 @@ function PeerDetails({ peer, status }) {
 
 function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState({
+  const [form, setForm, dirty] = useDirtyState({
     fqdn:      peer.fqdn      || '',
     address:   peer.address   || '',
     port:      peer.port      || 3868,
@@ -393,6 +396,7 @@ function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
     enabled:   peer.enabled   ?? true,
   })
   const [submitting, setSubmitting] = useState(false)
+  const { requestClose: guardedClose, confirming, confirmDiscard, cancelDiscard } = useConfirmClose(dirty, onClose)
 
   const set = useCallback((field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -417,7 +421,13 @@ function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
   }, [form, peer.name, toast, onSaved])
 
   return (
-    <Modal title={`Edit Peer — ${peer.name}`} onClose={onClose} size="lg">
+    <Modal
+      title={`Edit Peer — ${peer.name}`}
+      onClose={guardedClose}
+      size="lg"
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+    >
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-group">
@@ -482,14 +492,16 @@ function EditPeerModal({ peer, lbGroups, onClose, onSaved }) {
           </button>
         </div>
       </form>
+      <DiscardConfirm open={confirming} onDiscard={confirmDiscard} onCancel={cancelDiscard} />
     </Modal>
   )
 }
 
 function AddPeerModal({ lbGroups, onClose, onCreated }) {
   const toast = useToast()
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [form, setForm, dirty] = useDirtyState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
+  const { requestClose: guardedClose, confirming, confirmDiscard, cancelDiscard } = useConfirmClose(dirty, onClose)
 
   const set = useCallback((field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -514,7 +526,13 @@ function AddPeerModal({ lbGroups, onClose, onCreated }) {
   }, [form, toast, onCreated])
 
   return (
-    <Modal title="Add Peer" onClose={onClose} size="lg">
+    <Modal
+      title="Add Peer"
+      onClose={guardedClose}
+      size="lg"
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+    >
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-row">
@@ -580,6 +598,7 @@ function AddPeerModal({ lbGroups, onClose, onCreated }) {
           </button>
         </div>
       </form>
+      <DiscardConfirm open={confirming} onDiscard={confirmDiscard} onCancel={cancelDiscard} />
     </Modal>
   )
 }

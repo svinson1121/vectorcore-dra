@@ -3,8 +3,11 @@ import { Plus, Trash2, Edit3, RefreshCw, XCircle, ToggleLeft, ToggleRight } from
 import Badge from '../components/Badge.jsx'
 import Spinner from '../components/Spinner.jsx'
 import Modal from '../components/Modal.jsx'
+import DiscardConfirm from '../components/DiscardConfirm.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { usePoller } from '../hooks/usePoller.js'
+import { useDirtyState } from '../hooks/useDirtyState.js'
+import { useConfirmClose } from '../hooks/useConfirmClose.js'
 import {
   getRoutes, createRoute, updateRoute, deleteRoute,
   getIMSIRoutes, createIMSIRoute, updateIMSIRoute, deleteIMSIRoute,
@@ -259,8 +262,9 @@ function RouteRulesTab() {
 
 function RouteModal({ initial, lbGroups, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(initial ? { ...ROUTE_DEFAULTS, ...initial } : { ...ROUTE_DEFAULTS })
+  const [form, setForm, dirty] = useDirtyState(initial ? { ...ROUTE_DEFAULTS, ...initial } : { ...ROUTE_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
+  const { requestClose: guardedClose, confirming, confirmDiscard, cancelDiscard } = useConfirmClose(dirty, onClose)
 
   const set = useCallback((k, v) => setForm(prev => ({ ...prev, [k]: v })), [])
 
@@ -293,7 +297,12 @@ function RouteModal({ initial, lbGroups, onClose, onSaved }) {
   }, [form, initial, toast, onSaved])
 
   return (
-    <Modal title={initial ? 'Edit Route Rule' : 'Add Route Rule'} onClose={onClose}>
+    <Modal
+      title={initial ? 'Edit Route Rule' : 'Add Route Rule'}
+      onClose={guardedClose}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+    >
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-row">
@@ -379,6 +388,7 @@ function RouteModal({ initial, lbGroups, onClose, onSaved }) {
           </button>
         </div>
       </form>
+      <DiscardConfirm open={confirming} onDiscard={confirmDiscard} onCancel={cancelDiscard} />
     </Modal>
   )
 }
@@ -532,8 +542,9 @@ function IMSIRoutesTab() {
 
 function IMSIModal({ initial, lbGroups, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(initial ? { ...IMSI_DEFAULTS, ...initial } : { ...IMSI_DEFAULTS })
+  const [form, setForm, dirty] = useDirtyState(initial ? { ...IMSI_DEFAULTS, ...initial } : { ...IMSI_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
+  const { requestClose: guardedClose, confirming, confirmDiscard, cancelDiscard } = useConfirmClose(dirty, onClose)
 
   const set = useCallback((k, v) => setForm(prev => ({ ...prev, [k]: v })), [])
 
@@ -568,7 +579,12 @@ function IMSIModal({ initial, lbGroups, onClose, onSaved }) {
   }, [form, initial, toast, onSaved])
 
   return (
-    <Modal title={initial ? 'Edit IMSI Route' : 'Add IMSI Route'} onClose={onClose}>
+    <Modal
+      title={initial ? 'Edit IMSI Route' : 'Add IMSI Route'}
+      onClose={guardedClose}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+    >
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-group">
@@ -616,6 +632,7 @@ function IMSIModal({ initial, lbGroups, onClose, onSaved }) {
           </button>
         </div>
       </form>
+      <DiscardConfirm open={confirming} onDiscard={confirmDiscard} onCancel={cancelDiscard} />
     </Modal>
   )
 }
@@ -747,8 +764,9 @@ function PeerGroupsTab() {
 
 function LBGroupModal({ initial, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(initial ? { ...GROUP_DEFAULTS, ...initial } : { ...GROUP_DEFAULTS })
+  const [form, setForm, dirty] = useDirtyState(initial ? { ...GROUP_DEFAULTS, ...initial } : { ...GROUP_DEFAULTS })
   const [submitting, setSubmitting] = useState(false)
+  const { requestClose: guardedClose, confirming, confirmDiscard, cancelDiscard } = useConfirmClose(dirty, onClose)
 
   const set = useCallback((k, v) => setForm(prev => ({ ...prev, [k]: v })), [])
 
@@ -776,7 +794,12 @@ function LBGroupModal({ initial, onClose, onSaved }) {
   }, [form, initial, toast, onSaved])
 
   return (
-    <Modal title={initial ? 'Edit LB Group' : 'Add LB Group'} onClose={onClose}>
+    <Modal
+      title={initial ? 'Edit LB Group' : 'Add LB Group'}
+      onClose={guardedClose}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+    >
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
           <div className="form-group">
@@ -804,6 +827,7 @@ function LBGroupModal({ initial, onClose, onSaved }) {
           </button>
         </div>
       </form>
+      <DiscardConfirm open={confirming} onDiscard={confirmDiscard} onCancel={cancelDiscard} />
     </Modal>
   )
 }
